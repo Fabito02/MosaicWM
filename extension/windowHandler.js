@@ -755,6 +755,11 @@ export const WindowHandler = GObject.registerClass({
             return workspace;
         }
 
+        if (WindowState.get(window, 'restoringFromMiniature')) {
+            Logger.log(`ensureWindowFits: Skipping - restoring from miniature for ${window.get_id()}`);
+            return workspace;
+        }
+
         // Already constrained — sibling frames may not have settled yet; tile directly to avoid false overflow.
         if (WindowState.get(window, 'isConstrainedByMosaic')) {
             Logger.log(`ensureWindowFits: Window ${window.get_id()} already constrained by mosaic - tiling directly`);
@@ -827,7 +832,10 @@ export const WindowHandler = GObject.registerClass({
             .filter(w => w.get_id() !== window.get_id() && !this.edgeTilingManager.isEdgeTiled(w)
                 && !WindowState.get(w, 'pendingInQueue'));
 
-        const existingWindows = allExistingWindows.filter(w => !this.windowingManager.isMaximizedOrFullscreen(w));
+        const existingWindows = allExistingWindows.filter(w =>
+            !this.windowingManager.isMaximizedOrFullscreen(w) &&
+            !WindowState.get(w, IS_MINIATURE)
+        );
 
         if (existingWindows.length > 0) {
             const resizeSuccess = this.tilingManager.tryFitWithResize(window, existingWindows, workArea);
