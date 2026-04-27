@@ -13,6 +13,7 @@ import * as Logger from './logger.js';
 import * as constants from './constants.js';
 import { TileZone } from './constants.js';
 import * as WindowState from './windowState.js';
+import { IS_MINIATURE } from './windowState.js';
 import { ComputedLayouts } from './tiling.js';
 import { afterWorkspaceSwitch, afterAnimations, afterWindowClose } from './timing.js';
 
@@ -537,6 +538,11 @@ export const WindowHandler = GObject.registerClass({
         Logger.log(`onWindowDestroyed: ${windowId}`);
 
         this.disconnectWindowSignals(window);
+
+        if (this._ext.miniatureManager && WindowState.get(window, IS_MINIATURE)) {
+            this._ext.miniatureManager.destroyMiniature(window);
+        }
+
         this.edgeTilingManager.clearWindowState(window);
 
         const debounceId = WindowState.get(window, 'workspaceChangeDebounceId');
@@ -1148,6 +1154,21 @@ export const WindowHandler = GObject.registerClass({
                 // Ensure all windows are released from smart-resize state before we try to restore them
                 WindowState.set(w, 'isSmartResizing', false);
                 // Preserve preferredSize for restoration
+            }
+
+            // Auto-restore oldest miniature when space is freed (not an overflow move)
+            if (this._ext.miniatureManager) {
+                const miniatureWindows = remainingWindows
+                    .filter(w => WindowState.get(w, IS_MINIATURE))
+                    .sort((a, b) => a.get_id() - b.get_id());
+
+                if (miniatureWindows.length > 0 && !wasMovedByOverflow) {
+                    const candidate = miniatureWindows[0];
+                    this._ext._miniatureCascadeIds?.delete(candidate.get_id());
+                    this._ext.miniatureManager.restoreMiniature(candidate, null);
+                    this._ext._onMiniatureRestored(candidate);
+                    return GLib.SOURCE_REMOVE;
+                }
             }
 
             // Try to restore window sizes with freed space (Reverse Smart Resize)
