@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# MosaicWM pre-commit hook
+# Runs eslint on staged extension files
+
+STAGED_JS=$(git diff --cached --name-only --diff-filter=ACM -- 'extension/*.js')
+
+if [ -z "$STAGED_JS" ]; then
+    exit 0
+fi
+
+echo "Running eslint on staged files..."
+npx eslint $STAGED_JS
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "eslint found issues. Fix with: npx eslint extension/ --fix"
+    echo "Or skip this check with: git commit --no-verify"
+    exit 1
+fi
