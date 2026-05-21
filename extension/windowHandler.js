@@ -507,13 +507,14 @@ export const WindowHandler = GObject.registerClass({
                 }
 
                 // Try smart resize (now synchronous)
-                const resizeSuccess = this.tilingManager.tryFitWithResize(window, existingWindows, workArea);
+                const resizeResult = this.tilingManager.tryFitWithResize(window, existingWindows, workArea);
 
-                if (resizeSuccess) {
+                if (resizeResult?.success) {
                     Logger.log('Re-include: Smart resize applied - tiling workspace');
                     WindowState.set(window, 'justReturnedFromExclusion', true);
                     this.tilingManager._isSmartResizingBlocked = true;
                     try {
+                        this.tilingManager._pendingMiniatureWindows = resizeResult.pendingWindows ?? [];
                         this.tilingManager.tileWorkspaceWindows(workspace, null, monitor, false);
                     } finally {
                         this.tilingManager._isSmartResizingBlocked = false;
@@ -838,12 +839,13 @@ export const WindowHandler = GObject.registerClass({
         );
 
         if (existingWindows.length > 0) {
-            const resizeSuccess = this.tilingManager.tryFitWithResize(window, existingWindows, workArea);
-            if (resizeSuccess) {
+            const resizeResult = this.tilingManager.tryFitWithResize(window, existingWindows, workArea);
+            if (resizeResult?.success) {
                 Logger.log('Smart resize applied - tiling directly');
                 // Block overflow during tiling — null reference prevents expulsion
                 this.tilingManager._isSmartResizingBlocked = true;
                 try {
+                    this.tilingManager._pendingMiniatureWindows = resizeResult.pendingWindows ?? [];
                     this.tilingManager.tileWorkspaceWindows(workspace, null, monitor, false);
                 } finally {
                     this.tilingManager._isSmartResizingBlocked = false;
@@ -1360,14 +1362,15 @@ export const WindowHandler = GObject.registerClass({
                     }
                 }
 
-                const resizeSuccess = this.tilingManager.tryFitWithResize(window, existingWindows, workArea);
+                const resizeResult = this.tilingManager.tryFitWithResize(window, existingWindows, workArea);
 
-                if (resizeSuccess) {
+                if (resizeResult?.success) {
                     Logger.log('DnD arrival: Smart Resize succeeded - tiling workspace');
                     this.tilingManager._isSmartResizingBlocked = true;
                     afterWorkspaceSwitch(() => {
                         afterAnimations(this.animationsManager, () => {
                             try {
+                                this.tilingManager._pendingMiniatureWindows = resizeResult.pendingWindows ?? [];
                                 this.tilingManager.tileWorkspaceWindows(currentWorkspace, window, monitor, false);
                             } finally {
                                 this.tilingManager._isSmartResizingBlocked = false;

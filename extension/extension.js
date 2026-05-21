@@ -498,11 +498,14 @@ export default class WindowMosaicExtension extends Extension {
                 !this.windowingManager.isMaximizedOrFullscreen(w)
             );
 
-        const resizeOk = this.tilingManager.tryFitWithResize(window, existingWindows, workArea);
+        const resizeResult = this.tilingManager.tryFitWithResize(window, existingWindows, workArea);
 
-        if (resizeOk) {
+        if (resizeResult?.success) {
             this.tilingManager._isSmartResizingBlocked = true;
             try {
+                // Pass pending miniatures to tileWorkspaceWindows via instance state;
+                // it'll skip animateReTiling for them and create miniatures itself.
+                this.tilingManager._pendingMiniatureWindows = resizeResult.pendingWindows ?? [];
                 this.tilingManager.tileWorkspaceWindows(workspace, null, monitor, false);
             } finally {
                 this.tilingManager._isSmartResizingBlocked = false;

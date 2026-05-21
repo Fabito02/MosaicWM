@@ -35,13 +35,15 @@ import {
  * This works regardless of where Mutter actually placed the actor.
  */
 export function applyMiniatureActorState(actor, scale, extLeft, extTop, targetX, targetY) {
+    const [ax, ay] = actor.get_position();
+    const [actorW, actorH] = actor.get_size();
     actor.set_pivot_point(0, 0);
     actor.remove_all_transitions();
     actor.set_scale(scale, scale);
-    const [ax, ay] = actor.get_position();
     const tx = targetX - ax - extLeft * scale;
     const ty = targetY - ay - extTop * scale;
     actor.set_translation(tx, ty, 0);
+    Logger.log(`[MINIATURE] applyMiniatureActorState: actor=( ${ax},${ay} ${actorW}x${actorH}) target=(${targetX},${targetY}) scale=${scale} tx=${tx} ty=${ty} FINAL_SIZE=${Math.round(actorW * scale)}x${Math.round(actorH * scale)}`);
 }
 
 /**
@@ -236,12 +238,13 @@ export const MiniatureManager = GObject.registerClass({
         this._miniatureWindows = new Set();
     }
 
-    createMiniature(window, computedSlot) {
+    createMiniature(window, computedSlot, forcedPreSize = null) {
         const windowActor = window.get_compositor_private();
         if (!windowActor) return false;
 
-        const preSize = window.get_frame_rect();
+        const preSize = forcedPreSize || window.get_frame_rect();
         const scale = 256 / Math.max(preSize.width, preSize.height);
+        Logger.log(`[MINIATURE] createMiniature ${window.get_id()}: preSize=${preSize.width}x${preSize.height} scale=${scale} forced=${!!forcedPreSize}`);
 
         const targetX = computedSlot.x;
         const targetY = computedSlot.y;
@@ -274,11 +277,14 @@ export const MiniatureManager = GObject.registerClass({
         WindowState.set(window, ANIMATING_MINIATURE, true);
         WindowState.set(window, MINIATURE_ANIM_KIND, 'create');
 
-        // Zoom-out animation: scale from 1.0 to miniatureScale, centered
+        // Zoom-out animation: scale from 1.0 to miniatureScale, centered.
+        // With pivot at center, scaling keeps the actor's center fixed, so translation
+        // must offset by actorW*(1-scale)/2 to land the frame top-left at target.
         windowActor.set_pivot_point(0.5, 0.5);
         const [ax, ay] = windowActor.get_position();
-        const tx = targetX - ax - extLeft * scale;
-        const ty = targetY - ay - extTop * scale;
+        const [actorW, actorH] = windowActor.get_size();
+        const tx = targetX - ax - actorW * (1 - scale) / 2 - extLeft * scale;
+        const ty = targetY - ay - actorH * (1 - scale) / 2 - extTop * scale;
 
         windowActor.ease({
             scale_x: scale,
@@ -300,7 +306,9 @@ export const MiniatureManager = GObject.registerClass({
                 if (finalTgt && finalSc) {
                     applyMiniatureActorState(windowActor, finalSc, finalExtL, finalExtT, finalTgt.x, finalTgt.y);
                 }
-                Logger.log(`[MINIATURE] createMiniature animation complete ${window.get_id()}`);
+                const [finalAx, finalAy] = windowActor.get_position();
+                const [finalW, finalH] = windowActor.get_size();
+                Logger.log(`[MINIATURE] createMiniature animation complete ${window.get_id()}: FINAL actor=(${finalAx},${finalAy} ${finalW}x${finalH}) scale=${finalSc} FINAL_VISUAL=${Math.round(finalW * finalSc)}x${Math.round(finalH * finalSc)}`);
             },
         });
 
@@ -374,7 +382,9 @@ export const MiniatureManager = GObject.registerClass({
                     windowActor.set_pivot_point(0, 0);
                     windowActor.set_scale(1.0, 1.0);
                     windowActor.set_translation(0, 0, 0);
-                    Logger.log(`[MINIATURE] restoreMiniature animation complete ${window.get_id()}`);
+                    const [finalAx, finalAy] = windowActor.get_position();
+                    const [finalW, finalH] = windowActor.get_size();
+                    Logger.log(`[MINIATURE] restoreMiniature animation complete ${window.get_id()}: FINAL actor=(${finalAx},${finalAy} ${finalW}x${finalH})`);
                 },
             });
         }
@@ -385,6 +395,9 @@ export const MiniatureManager = GObject.registerClass({
         WindowState.remove(window, MINIATURE_TARGET_POS);
         WindowState.remove(window, MINIATURE_EXT_LEFT);
         WindowState.remove(window, MINIATURE_EXT_TOP);
+        // Stale mini-target persists when a window's min size prevents tryFitWithResize
+        // from rewriting it; without clearing, the next layout uses the obsolete mini size.
+        WindowState.remove(window, 'targetSmartResizeSize');
 
         const timeoutId = WindowState.get(window, 'miniatureJustMiniaturizedTimeoutId');
         if (timeoutId) GLib.source_remove(timeoutId);
