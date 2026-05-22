@@ -2161,7 +2161,6 @@ export const TilingManager = GObject.registerClass({
         this._drawTile(tile_info, work_area, meta_windows, true);
     }
 
-    // Binary search for optimal scale factor that makes all windows fit
     tryFitWithResize(newWindow, windows, workArea) {
         if (this._isSmartResizingBlocked) {
             Logger.log('[SMART RESIZE] tryFitWithResize BLOCKED by _isSmartResizingBlocked');
@@ -2171,6 +2170,9 @@ export const TilingManager = GObject.registerClass({
 
         // Reset rebalance counter for this new smart resize cycle
         this._extension?.resizeHandler?.resetConstraintRebalanceCount();
+
+        // Reset recent miniature tracking for new cycle
+        this._recentMiniatureWindows = {}; // { windowId: timestamp }
 
         try {
             const allResizable = [];
@@ -2187,6 +2189,20 @@ export const TilingManager = GObject.registerClass({
                     && !WindowState.get(w, 'openingSize')
                     && !WindowState.get(w, 'isConstrainedByMosaic')) {
                     Logger.log(`[SMART RESIZE] Skipping uninitialized window ${w.get_id()}`);
+                    continue;
+                }
+
+                // Skip already-miniaturized windows — their slot is reserved and shouldn't be re-evaluated
+                if (WindowState.get(w, IS_MINIATURE)) {
+                    Logger.log(`[SMART RESIZE] Skipping already miniature window ${w.get_id()} — IS_MINIATURE=true`);
+                    this._recentMiniatureWindows[w.get_id()] = Date.now();
+                    continue;
+                }
+
+                // Skip recently miniatured windows — resize bounce while settling
+                const recentTimestamp = this._recentMiniatureWindows[w.get_id()];
+                if (recentTimestamp && Date.now() - recentTimestamp < 2000) {
+                    Logger.log(`[SMART RESIZE] Skipping recently miniatured window ${w.get_id()} — timestamp: ${recentTimestamp}`);
                     continue;
                 }
 

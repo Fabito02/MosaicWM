@@ -382,6 +382,7 @@ export const MiniatureManager = GObject.registerClass({
                     windowActor.set_pivot_point(0, 0);
                     windowActor.set_scale(1.0, 1.0);
                     windowActor.set_translation(0, 0, 0);
+                    window.activate(global.get_current_time());
                     const [finalAx, finalAy] = windowActor.get_position();
                     const [finalW, finalH] = windowActor.get_size();
                     Logger.log(`[MINIATURE] restoreMiniature animation complete ${window.get_id()}: FINAL actor=(${finalAx},${finalAy} ${finalW}x${finalH})`);
