@@ -9,8 +9,7 @@ if [ -z "$STAGED_JS" ]; then
 fi
 
 echo "Running eslint on staged files..."
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-toolbox run -c dev bash -c "cd $REPO_ROOT && npx eslint $STAGED_JS"
+npx eslint $STAGED_JS
 
 if [ $? -ne 0 ]; then
     echo ""
