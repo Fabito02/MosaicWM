@@ -506,8 +506,11 @@ export const WindowHandler = GObject.registerClass({
                     return GLib.SOURCE_REMOVE;
                 }
 
-                // Try smart resize (now synchronous)
-                const resizeResult = this.tilingManager.tryFitWithResize(window, existingWindows, workArea);
+                // Try smart resize (now synchronous). Treat the re-included
+                // window as focused — Mutter's focus_window may still point at
+                // the previously focused sibling, which would otherwise be
+                // excluded from miniaturization candidates alongside newWindow.
+                const resizeResult = this.tilingManager.tryFitWithResize(window, existingWindows, workArea, window);
 
                 if (resizeResult?.success) {
                     Logger.log('Re-include: Smart resize applied - tiling workspace');
@@ -841,7 +844,10 @@ export const WindowHandler = GObject.registerClass({
         );
 
         if (existingWindows.length > 0) {
-            const resizeResult = this.tilingManager.tryFitWithResize(window, existingWindows, workArea);
+            // Pass the new window as focused override — Mutter's focus_window
+            // may still be the previously focused sibling at this point, which
+            // would exclude it from miniaturization alongside newWindow.
+            const resizeResult = this.tilingManager.tryFitWithResize(window, existingWindows, workArea, window);
             if (resizeResult?.success) {
                 Logger.log('Smart resize applied - tiling directly');
                 // Block overflow during tiling — null reference prevents expulsion
@@ -1372,7 +1378,7 @@ export const WindowHandler = GObject.registerClass({
                     }
                 }
 
-                const resizeResult = this.tilingManager.tryFitWithResize(window, existingWindows, workArea);
+                const resizeResult = this.tilingManager.tryFitWithResize(window, existingWindows, workArea, window);
 
                 if (resizeResult?.success) {
                     Logger.log('DnD arrival: Smart Resize succeeded - tiling workspace');
