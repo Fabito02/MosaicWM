@@ -371,6 +371,8 @@ export const TilingManager = GObject.registerClass({
                             constants.ANIMATION_DURATION_MS);
                         WindowState.get(window, MINIATURE_OVERLAY)?.animateToPosition(constants.ANIMATION_DURATION_MS);
                     }
+                    // MosaicLayoutStrategy reads ComputedLayouts for the overview slot — keep it in sync.
+                    ComputedLayouts.set(window, { x: pos.x, y: pos.y, width: pos.width, height: pos.height });
                     continue;
                 }
 
@@ -1296,6 +1298,10 @@ export const TilingManager = GObject.registerClass({
                                         constants.ANIMATION_DURATION_MS);
                                     WindowState.get(window, MINIATURE_OVERLAY)?.animateToPosition(constants.ANIMATION_DURATION_MS);
                                 }
+                                // MosaicLayoutStrategy reads ComputedLayouts for the overview slot — keep it in sync.
+                                const miniSlot = { x: tx, y: ty, width: windowDesc.width, height: windowDesc.height };
+                                ComputedLayouts.set(window, miniSlot);
+                                if (slotsOut) slotsOut.set(window.get_id(), miniSlot);
                                 Logger.log(`[MINIATURE] animateTile H ${window.get_id()}: target=(${tx},${ty}) scale=${sc.toFixed(4)} extLeft=${extL} extTop=${extT} size=${windowDesc.width}x${windowDesc.height}`);
                             } else if (windowDesc.id === resizingWindowId) {
                                 window.move_frame(false, x, y + y_offset);
@@ -1342,6 +1348,10 @@ export const TilingManager = GObject.registerClass({
                                         constants.ANIMATION_DURATION_MS);
                                     WindowState.get(window, MINIATURE_OVERLAY)?.animateToPosition(constants.ANIMATION_DURATION_MS);
                                 }
+                                // MosaicLayoutStrategy reads ComputedLayouts for the overview slot — keep it in sync.
+                                const miniSlot = { x: targetX, y: targetY, width: windowDesc.width, height: windowDesc.height };
+                                ComputedLayouts.set(window, miniSlot);
+                                if (slotsOut) slotsOut.set(window.get_id(), miniSlot);
                                 Logger.log(`[MINIATURE] animateTile V ${window.get_id()}: target=(${targetX},${targetY}) scale=${sc.toFixed(4)} extLeft=${extL} extTop=${extT} slotSize=${windowDesc.width}x${windowDesc.height} VISUAL_EXPECTED=${Math.round(windowDesc.width * sc)}x${Math.round(windowDesc.height * sc)}`);
                             } else if (windowDesc.id === resizingWindowId) {
                                 window.move_frame(false, targetX, targetY);
