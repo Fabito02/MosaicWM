@@ -4,6 +4,7 @@
 import GObject from 'gi://GObject';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
+import Meta from 'gi://Meta';
 
 import * as Logger from './logger.js';
 import * as WindowState from './windowState.js';
@@ -456,6 +457,15 @@ export const MiniatureManager = GObject.registerClass({
         Logger.log(`[MINIATURE] Destroyed miniature ${window.get_id()} (window closed)`);
     }
 
+    // Hard-restore every miniature back to full size. Used by disable() to
+    // leave a clean slate — the next enable() rebuilds via enforceWorkspaceFit.
+    restoreAllMiniatures() {
+        const windows = global.display.get_tab_list(Meta.TabList.NORMAL, null)
+            .filter(w => WindowState.get(w, IS_MINIATURE));
+        for (const window of windows) {
+            this.restoreMiniature(window, null);
+        }
+    }
 
     destroy() {
         for (const id of this._miniatureWindows) {

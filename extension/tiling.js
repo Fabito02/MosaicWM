@@ -4,6 +4,7 @@
 
 import Clutter from 'gi://Clutter'; // Used for Enums (AnimationMode, etc)
 import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 
 import * as Logger from './logger.js';
 import * as constants from './constants.js';
@@ -1394,6 +1395,46 @@ export const TilingManager = GObject.registerClass({
         }
 
         return true;
+    }
+
+    // Re-apply mosaic from scratch with smart-resize + miniaturization. Used by
+    // extension enable and Quick Settings toggle-on — tileWorkspaceWindows's
+    // overflow path needs a "newly added" reference window, so can't handle this.
+    enforceWorkspaceFit(workspace, monitor) {
+        if (!workspace || workspace.index() < 0) return;
+        if (this._extension && !this._extension.isMosaicEnabledForWorkspace(workspace)) return;
+
+        const workArea = workspace.get_work_area_for_monitor(monitor);
+        if (!workArea || workArea.width <= 0 || workArea.height <= 0) return;
+
+        const allWindows = this._windowingManager.getMonitorWorkspaceWindows(workspace, monitor)
+            .filter(w => !this._windowingManager.isExcluded(w)
+                && !this._windowingManager.isMaximizedOrFullscreen(w)
+                && !this._extension?.edgeTilingManager?.isEdgeTiled?.(w));
+
+        if (allWindows.length === 0) return;
+
+        // Pick the most recently focused as the protected "newcomer" — without
+        // one, every window is an equal miniaturization candidate, jarring on re-enable.
+        const tabList = global.display.get_tab_list(Meta.TabList.NORMAL, workspace);
+        const reference = tabList.find(w => allWindows.some(aw => aw.get_id() === w.get_id()))
+            ?? allWindows[0];
+        const others = allWindows.filter(w => w.get_id() !== reference.get_id());
+
+        const resizeResult = this.tryFitWithResize(reference, others, workArea, reference);
+
+        if (resizeResult?.success) {
+            this._isSmartResizingBlocked = true;
+            try {
+                this._pendingMiniatureWindows = resizeResult.pendingWindows ?? [];
+                this.tileWorkspaceWindows(workspace, null, monitor, false);
+            } finally {
+                this._isSmartResizingBlocked = false;
+            }
+        } else {
+            // Couldn't smart-resize to fit — degrade to oversized tiling rather than crash.
+            this.tileWorkspaceWindows(workspace, null, monitor, true);
+        }
     }
 
     tileWorkspaceWindows(workspace, reference_meta_window, _monitor, keep_oversized_windows, excludeFromTiling = false, dryRun = false, isRecursive = false) {

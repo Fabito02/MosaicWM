@@ -80,7 +80,9 @@ const MosaicMenuToggle = GObject.registerClass(
                     const workspace = this._workspaceManager.get_workspace_by_index(i);
                     if (workspace) {
                         Logger.log(`Quick Settings: Re-tiling workspace ${i + 1} (global toggle)`);
-                        this._extension.tilingManager.tileWorkspaceWindows(workspace, null, null, false);
+                        const nMonitors = global.display.get_n_monitors();
+                        for (let j = 0; j < nMonitors; j++)
+                            this._extension.tilingManager.enforceWorkspaceFit(workspace, j);
                     }
                 }
             } else {
@@ -175,8 +177,9 @@ const MosaicMenuToggle = GObject.registerClass(
                 const workspace = this._workspaceManager.get_workspace_by_index(workspaceIndex);
                 if (workspace) {
                     Logger.log(`Quick Settings: Re-tiling workspace ${workspaceIndex + 1}`);
-                    // Monitor detection is automatic in tileWorkspaceWindows
-                    this._extension.tilingManager.tileWorkspaceWindows(workspace, null, null, false);
+                    const nMonitors = global.display.get_n_monitors();
+                    for (let j = 0; j < nMonitors; j++)
+                        this._extension.tilingManager.enforceWorkspaceFit(workspace, j);
                 }
             }
         }

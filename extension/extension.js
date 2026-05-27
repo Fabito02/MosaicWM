@@ -115,7 +115,7 @@ export default class WindowMosaicExtension extends Extension {
             const workspace = this._workspaceManager.get_workspace_by_index(i);
             const nMonitors = global.display.get_n_monitors();
             for(let j = 0; j < nMonitors; j++)
-                this.tilingManager.tileWorkspaceWindows(workspace, false, j, true);
+                this.tilingManager.enforceWorkspaceFit(workspace, j);
         }
     };
 
@@ -711,9 +711,13 @@ export default class WindowMosaicExtension extends Extension {
         }
 
         if (this.miniatureManager) {
+            // Disconnect listener first — otherwise restoreMiniature re-enters
+            // _onMiniatureRestored, scheduling timeouts that fire after windowHandler is nulled.
             if (this._miniatureRestoredId)
                 this.miniatureManager.disconnect(this._miniatureRestoredId);
             this._miniatureRestoredId = 0;
+            // Restore miniatures to full size — otherwise users see scaled, click-dead windows post-disable.
+            this.miniatureManager.restoreAllMiniatures();
             this.miniatureManager.destroy();
             this.miniatureManager = null;
         }
