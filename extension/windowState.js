@@ -46,7 +46,6 @@ export const PRE_MINIATURE_SIZE = 'preMiniatureSize';
 export const MINIATURE_TARGET_POS = 'miniatureTargetPos';
 export const MINIATURE_EXT_LEFT = 'miniatureExtLeft';
 export const MINIATURE_EXT_TOP = 'miniatureExtTop';
-export const MINIATURE_EXT_BOTTOM = 'miniatureExtBottom';
 export const ANIMATING_MINIATURE = 'animatingMiniature';
 export const MINIATURE_OVERLAY = 'miniatureOverlay';
 export const MINIATURE_ANIM_KIND = 'miniatureAnimKind';

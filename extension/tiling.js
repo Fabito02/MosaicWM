@@ -1399,9 +1399,6 @@ export const TilingManager = GObject.registerClass({
         return true;
     }
 
-    // Arrange windows in a cascade (largest → smallest, left → right) with smooth
-    // animation. Called after workspace mosaic is disabled so windows get a tidy
-    // resting state instead of staying in their last tiled positions.
     cascadeWorkspaceWindows(workspace) {
         if (!workspace || workspace.index() < 0) return;
 
@@ -1422,7 +1419,6 @@ export const TilingManager = GObject.registerClass({
 
         const OFFSET = 56;
 
-        // Compute positions relative to (0,0), then center the group in the work area.
         const frames = windows.map(w => w.get_frame_rect());
         const relPositions = frames.map((f, i) => ({ x: i * OFFSET, y: i * OFFSET, w: f.width, h: f.height }));
 

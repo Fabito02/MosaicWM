@@ -107,7 +107,7 @@ export default class WindowMosaicExtension extends Extension {
         if (this.edgeTilingManager)
             this.edgeTilingManager.clearAllStates();
 
-        // Wait for miniature restore animations (250 ms) before cascading.
+        // 300 ms margin lets the 250 ms miniature-restore animations finish first.
         this._timeoutRegistry?.add(300, () => {
             if (!this.isMosaicEnabledForWorkspace(workspace))
                 this.tilingManager?.cascadeWorkspaceWindows(workspace);

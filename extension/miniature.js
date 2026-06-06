@@ -15,7 +15,6 @@ import {
     MINIATURE_TARGET_POS,
     MINIATURE_EXT_LEFT,
     MINIATURE_EXT_TOP,
-    MINIATURE_EXT_BOTTOM,
     ANIMATING_MINIATURE,
     MINIATURE_OVERLAY,
     MINIATURE_ANIM_KIND,
@@ -265,11 +264,8 @@ export const MiniatureManager = GObject.registerClass({
 
         // Compute shadow extents BEFORE any move (frame and actor are in sync)
         const [actorBefore_x, actorBefore_y] = windowActor.get_position();
-        const [_actorBefore_w, actorBefore_h] = windowActor.get_size();
         const extLeft = preSize.x - actorBefore_x;
         const extTop = preSize.y - actorBefore_y;
-        const extBottom = Math.max(0, (actorBefore_y + actorBefore_h) - (preSize.y + preSize.height));
-
         Logger.log(`[MINIATURE] createMiniature ${window.get_id()} (${window.get_wm_class?.() ?? '?'}): preFrame=(${preSize.x},${preSize.y} ${preSize.width}x${preSize.height}) actorBefore=(${actorBefore_x},${actorBefore_y}) target=(${targetX},${targetY}) scale=${scale.toFixed(4)} extLeft=${extLeft} extTop=${extTop}`);
 
         // Store state BEFORE animation - enforce effect and workspace animation
@@ -284,7 +280,6 @@ export const MiniatureManager = GObject.registerClass({
         WindowState.set(window, MINIATURE_TARGET_POS, { x: targetX, y: targetY });
         WindowState.set(window, MINIATURE_EXT_LEFT, extLeft);
         WindowState.set(window, MINIATURE_EXT_TOP, extTop);
-        WindowState.set(window, MINIATURE_EXT_BOTTOM, extBottom);
 
         // Add the enforce effect (guard will skip during animation)
         const enforceEffect = new MiniatureEnforceEffect(window);
