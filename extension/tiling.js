@@ -1568,7 +1568,7 @@ export const TilingManager = GObject.registerClass({
             return { overflow: false, layout: null };
         }
         let meta_windows = working_info.meta_windows;
-        let windows = working_info.windows;
+        const windows = working_info.windows;
         let work_area = working_info.work_area;
         const monitor = working_info.monitor;
 
