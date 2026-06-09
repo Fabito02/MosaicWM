@@ -702,11 +702,6 @@ export default class WindowMosaicExtension extends Extension {
             this._origWindowPreviewBoundingBoxDesc = null;
         }
 
-        // Restore original map animation and cleanup queue
-        if (this.windowHandler) {
-            this.windowHandler.destroy();
-        }
-
         Main.wm.removeKeybinding('tile-left');
         Main.wm.removeKeybinding('tile-right');
         Main.wm.removeKeybinding('tile-top-left');
@@ -718,8 +713,6 @@ export default class WindowMosaicExtension extends Extension {
         Main.wm.removeKeybinding('swap-up');
         Main.wm.removeKeybinding('swap-down');
         Logger.log('Keyboard shortcuts removed');
-
-        if (this.dragHandler) this.dragHandler.destroy();
 
         if (this.edgeTilingManager) this.edgeTilingManager.destroy();
         if (this.drawingManager) this.drawingManager.destroy();
