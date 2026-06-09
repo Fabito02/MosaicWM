@@ -4,6 +4,7 @@
 
 import * as Workspace from 'resource:///org/gnome/shell/ui/workspace.js';
 import { ComputedLayouts } from './tiling.js';
+import { WINDOW_SPACING } from './constants.js';
 
 // Scales down the layout instead of reorganizing windows (preserves spatial memory)
 export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
@@ -75,10 +76,12 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
             if (!rect) continue;
             
             // Formula: (DesktopPos - DesktopOrigin) * Scale + OverviewSlotOrigin + CenteringOffset
-            const x = (rect.x - workArea.x) * scale + area.x + offsetX;
-            const y = (rect.y - workArea.y) * scale + area.y + offsetY;
-            const w = rect.width * scale;
-            const h = rect.height * scale;
+            // Half-gap inset on each side → full WINDOW_SPACING between adjacent thumbnails
+            const gap = WINDOW_SPACING / 2;
+            const x = (rect.x - workArea.x) * scale + area.x + offsetX + gap;
+            const y = (rect.y - workArea.y) * scale + area.y + offsetY + gap;
+            const w = rect.width * scale - gap * 2;
+            const h = rect.height * scale - gap * 2;
             
             slots.push([x, y, w, h, clone]);
         }
