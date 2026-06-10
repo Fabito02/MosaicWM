@@ -1195,8 +1195,9 @@ export const WindowHandler = GObject.registerClass({
                 const restorableWindows = remainingWindows.filter(w => !WindowState.get(w, IS_MINIATURE));
                 if (freedWidth > 0 && freedHeight > 0 && restorableWindows.length > 0) {
                     const workArea = this._ext.tilingManager.getUsableWorkArea(WORKSPACE, MONITOR);
-                    // PASS null to force recalculation of real incremental available space
-                    const restored = this._ext.tilingManager.tryRestoreWindowSizes(restorableWindows, workArea, null, null, WORKSPACE, MONITOR);
+                    // Pass ALL remaining windows (including minis) so the fit simulation in
+                    // findBestRestorationGain accounts for the space miniatures occupy.
+                    const restored = this._ext.tilingManager.tryRestoreWindowSizes(remainingWindows, workArea, null, null, WORKSPACE, MONITOR);
 
                     if (restored) {
                         this._timeoutRegistry.add(constants.RESIZE_SETTLE_DELAY_MS, () => {

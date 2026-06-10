@@ -174,6 +174,9 @@ export const TilingManager = GObject.registerClass({
             const simulatedWindows = windows.map(w => {
                 const shrunk = shrunkWindows.find(sw => sw.id === w.get_id());
                 if (!shrunk) {
+                    // Miniatures occupy their scaled slot size — getMiniatureSize matches WindowDescriptor.
+                    const miniSize = getMiniatureSize(w);
+                    if (miniSize) return { id: w.get_id(), width: miniSize.width, height: miniSize.height };
                     // Use targetSmartResizeSize when present — WindowDescriptor uses the same value
                     // during actual tiling; diverging here would make simulations inconsistent.
                     const smartResizeSize = WindowState.get(w, 'targetSmartResizeSize');
@@ -2199,6 +2202,7 @@ export const TilingManager = GObject.registerClass({
         // Find windows that were shrunk (current size < preferred size)
         const shrunkWindows = [];
         for (const window of windows) {
+            if (WindowState.get(window, IS_MINIATURE)) continue;
             const preferredSize = WindowState.get(window, 'preferredSize');
             if (!preferredSize) continue;
             
@@ -2274,6 +2278,7 @@ export const TilingManager = GObject.registerClass({
             for (const sim of bestLayout) {
                 const w = windows.find(win => win.get_id() === sim.id);
                 if (w) {
+                    if (WindowState.get(w, IS_MINIATURE)) continue;
                     WindowState.set(w, 'isReverseSmartResizing', true);
                     
                     // Direct resize without animation for now to ensure stability
@@ -2389,17 +2394,10 @@ export const TilingManager = GObject.registerClass({
                     continue;
                 }
 
-                // Skip uninitialized windows — unreliable geometry corrupts binary search
-                if (w.get_id() !== newWindow.get_id()
-                    && !WindowState.get(w, 'preferredSize')
-                    && !WindowState.get(w, 'openingSize')
-                    && !WindowState.get(w, 'isConstrainedByMosaic')) {
-                    Logger.log(`[SMART RESIZE] Skipping uninitialized window ${w.get_id()}`);
-                    continue;
-                }
-
                 // Already-miniaturized: include as non-resizable fixed participants so the simulation
-                // accounts for the space they occupy. Timestamp kept for recently-restored debounce.
+                // accounts for the space they occupy. Must come before the uninitialized check —
+                // minis never get isConstrainedByMosaic (they skip that branch in drawTile) and
+                // may lack preferredSize, so they would be incorrectly filtered as uninitialized.
                 if (WindowState.get(w, IS_MINIATURE)) {
                     const ms = getMiniatureSize(w);
                     if (ms) {
@@ -2407,6 +2405,15 @@ export const TilingManager = GObject.registerClass({
                         windowData.set(w.get_id(), { window: w, current: ms, min: ms, isResizable: false });
                         this._recentMiniatureWindows[w.get_id()] = Date.now();
                     }
+                    continue;
+                }
+
+                // Skip uninitialized windows — unreliable geometry corrupts binary search
+                if (w.get_id() !== newWindow.get_id()
+                    && !WindowState.get(w, 'preferredSize')
+                    && !WindowState.get(w, 'openingSize')
+                    && !WindowState.get(w, 'isConstrainedByMosaic')) {
+                    Logger.log(`[SMART RESIZE] Skipping uninitialized window ${w.get_id()}`);
                     continue;
                 }
 
