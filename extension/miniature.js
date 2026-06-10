@@ -290,14 +290,18 @@ export const MiniatureManager = GObject.registerClass({
             WindowState.set(window, ANIMATING_MINIATURE, true);
             WindowState.set(window, MINIATURE_ANIM_KIND, 'create');
 
-            // Zoom-out animation: scale from 1.0 to miniatureScale, centered.
-            // With pivot at center, scaling keeps the actor's center fixed, so translation
-            // must offset by actorW*(1-scale)/2 to land the frame top-left at target.
-            windowActor.set_pivot_point(0.5, 0.5);
-            const [ax, ay] = windowActor.get_position();
+            // Pivot at the exact frame anchor so scale tracks adjacent edges; tx/ty absorb residual when clamped past [0,1].
             const [actorW, actorH] = windowActor.get_size();
-            const tx = targetX - ax - actorW * (1 - scale) / 2 - extLeft * scale;
-            const ty = targetY - ay - actorH * (1 - scale) / 2 - extTop * scale;
+            const dw = actorW * (1 - scale);
+            const dh = actorH * (1 - scale);
+            const px = dw > 0 ? Math.max(0, Math.min(1, (targetX - actorBefore_x - extLeft * scale) / dw)) : 0;
+            const py = dh > 0 ? Math.max(0, Math.min(1, (targetY - actorBefore_y - extTop * scale) / dh)) : 0;
+            const tx = targetX - actorBefore_x - px * dw - extLeft * scale;
+            const ty = targetY - actorBefore_y - py * dh - extTop * scale;
+
+            windowActor.remove_all_transitions();
+            windowActor.set_pivot_point(px, py);
+            windowActor.set_translation(0, 0, 0);
 
             windowActor.ease({
                 scale_x: scale,
@@ -359,6 +363,7 @@ export const MiniatureManager = GObject.registerClass({
         const sc = WindowState.get(window, MINIATURE_SCALE) ?? 1;
         const extL = WindowState.get(window, MINIATURE_EXT_LEFT) ?? 0;
         const extT = WindowState.get(window, MINIATURE_EXT_TOP) ?? 0;
+        const tgt = WindowState.get(window, MINIATURE_TARGET_POS);
 
         Logger.log(`[MINIATURE] restoreMiniature START ${window.get_id()} (${window.get_wm_class?.() ?? '?'}): frame=(${frame.x},${frame.y} ${frame.width}x${frame.height}) scale=${sc.toFixed(4)}`);
 
@@ -382,18 +387,27 @@ export const MiniatureManager = GObject.registerClass({
                 }
             }
 
-            // Compute the restored position (frame rect top-left)
+            // Symmetric to createMiniature: startTx/startTy seed the mini visual at miniTgt; animating both to 0 lands at ax+extL = frame.x.
             const [ax, ay] = windowActor.get_position();
-            const tx = frame.x - ax - extL;
-            const ty = frame.y - ay - extT;
+            const [actorW, actorH] = windowActor.get_size();
+            const miniTgt = tgt ?? { x: frame.x, y: frame.y };
+            const dw = actorW * (1 - sc);
+            const dh = actorH * (1 - sc);
+            const px = dw > 0 ? Math.max(0, Math.min(1, (miniTgt.x - ax - extL * sc) / dw)) : 0;
+            const py = dh > 0 ? Math.max(0, Math.min(1, (miniTgt.y - ay - extT * sc) / dh)) : 0;
+            const startTx = dw > 0 ? miniTgt.x - ax - px * dw - extL * sc : 0;
+            const startTy = dh > 0 ? miniTgt.y - ay - py * dh - extT * sc : 0;
 
-            // Enforce effect's translation assumes pivot-at-origin; changing it mid-animation causes a visual jump.
-            windowActor.set_pivot_point(0, 0);
+            windowActor.remove_all_transitions();
+            windowActor.set_pivot_point(px, py);
+            windowActor.set_scale(sc, sc);
+            windowActor.set_translation(startTx, startTy, 0);
+
             windowActor.ease({
                 scale_x: 1.0,
                 scale_y: 1.0,
-                translation_x: tx,
-                translation_y: ty,
+                translation_x: 0,
+                translation_y: 0,
                 duration: 250,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
                 onStopped: () => {
