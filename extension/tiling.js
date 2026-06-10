@@ -554,7 +554,16 @@ export const TilingManager = GObject.registerClass({
             const byAreaAsc = [...arr].sort((a, b) => (a.width * a.height) - (b.width * b.height));
             const byWidthDesc = [...arr].sort((a, b) => b.width - a.width);
             const byHeightDesc = [...arr].sort((a, b) => b.height - a.height);
-            return [arr, byAreaDesc, byAreaAsc, byWidthDesc, byHeightDesc];
+            const candidates = [arr, byAreaDesc, byAreaAsc, byWidthDesc, byHeightDesc];
+            if (this._positionSnapshot) {
+                const byPosX = [...arr].sort((a, b) => {
+                    const sa = this._positionSnapshot.get(a.id);
+                    const sb = this._positionSnapshot.get(b.id);
+                    return (sa?.cx ?? 0) - (sb?.cx ?? 0);
+                });
+                candidates.push(byPosX);
+            }
+            return candidates;
         }
         
         // Generate all permutations using Heap's algorithm
@@ -657,7 +666,7 @@ export const TilingManager = GObject.registerClass({
 
         const startTime = Date.now();
         const permutations = this._generatePermutations(windows);
-        const currentIds = windows.map(w => w.id);
+        const currentIds = this._lastTiledOrder ?? windows.map(w => w.id);
 
         let bestOrder = windows;
         let bestScore = -Infinity;
@@ -1811,6 +1820,9 @@ export const TilingManager = GObject.registerClass({
         }
 
         this._positionSnapshot = null;
+        if (tile_info?.levels?.length > 0) {
+            this._lastTiledOrder = tile_info.levels.flatMap(l => l.windows).map(w => w.id);
+        }
         Logger.log(`Drawing tiles - isDragging: ${this.isDragging}, using tileArea: x=${tileArea.x}, y=${tileArea.y}`);
         
         // ANIMATIONS
