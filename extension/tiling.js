@@ -69,6 +69,7 @@ export const TilingManager = GObject.registerClass({
         this._lastLayoutHash = null;
         this._cachedTileResult = null;
         this._lastTiledOrder = null;
+        this._skipStabilityForNextTile = false;
 
         // Swap/reorder operations per workspace — keyed by Meta.Workspace via WeakMap
         // to avoid monkey-patching native GObjects (the same reason windowState.js exists).
@@ -483,6 +484,8 @@ export const TilingManager = GObject.registerClass({
         const filtered = swaps.filter(op => !(Array.isArray(op) && op[0] === 'order'));
         filtered.push(['order', permOrder]);
         this._workspaceSwaps.set(workspace, filtered);
+        // Pre-drag positions still in snapshot next call; stability heuristic would revert this order.
+        this._skipStabilityForNextTile = true;
     }
 
     _moveElement(array, draggedId, targetId) {
@@ -1690,6 +1693,12 @@ export const TilingManager = GObject.registerClass({
         for (const w of meta_windows) {
             const f = w.get_frame_rect();
             this._positionSnapshot.set(w.get_id(), { cx: f.x + f.width / 2, cy: f.y + f.height / 2 });
+        }
+
+        // Zero-displacement bias makes stability scoring revert explicit drag order; suppress once.
+        if (this._skipStabilityForNextTile) {
+            this._skipStabilityForNextTile = false;
+            this._positionSnapshot = null;
         }
 
         let tile_info = this._tile(windows, tileArea, dryRun);
