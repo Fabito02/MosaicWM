@@ -292,19 +292,21 @@ export const MiniatureManager = GObject.registerClass({
                 // Interrupted restore — read current visual frame origin before canceling
                 const [cpx, cpy] = windowActor.get_pivot_point();
                 const cs = windowActor.scale_x;
-                const ctx = windowActor.translation_x;
-                const cty = windowActor.translation_y;
-                const visualX = actorBefore_x + cpx * actorW * (1 - cs) + ctx + extLeft * cs;
-                const visualY = actorBefore_y + cpy * actorH * (1 - cs) + cty + extTop * cs;
+                const curTx = windowActor.translation_x;
+                const curTy = windowActor.translation_y;
+                const visualX = actorBefore_x + cpx * actorW * (1 - cs) + curTx + extLeft * cs;
+                const visualY = actorBefore_y + cpy * actorH * (1 - cs) + curTy + extTop * cs;
                 const startTx = visualX - actorBefore_x - extLeft * cs;
                 const startTy = visualY - actorBefore_y - extTop * cs;
                 const endTx = targetX - actorBefore_x - extLeft * scale;
                 const endTy = targetY - actorBefore_y - extTop * scale;
                 const animDuration = Math.max(1, Math.round(250 * (cs - scale) / Math.max(0.001, 1.0 - scale)));
 
+                // Set kind before remove_all_transitions so that restore's onStopped — which
+                // fires synchronously — sees 'create' and skips its conditional removal.
+                // IS_MINIATURE is already true (set above), so restore's actor reset is also skipped.
                 WindowState.set(window, MINIATURE_ANIM_KIND, 'create');
                 windowActor.remove_all_transitions();
-                // restore's onStopped: IS_MINIATURE=true → no snap; kind already 'create' → removal skipped.
 
                 windowActor.set_pivot_point(0, 0);
                 windowActor.set_scale(cs, cs);
@@ -447,10 +449,10 @@ export const MiniatureManager = GObject.registerClass({
                 // Interrupted miniaturize — read current visual frame origin before canceling
                 const [cpx, cpy] = windowActor.get_pivot_point();
                 const cs = windowActor.scale_x;
-                const ctx = windowActor.translation_x;
-                const cty = windowActor.translation_y;
-                const visualX = ax + cpx * actorW * (1 - cs) + ctx + extL * cs;
-                const visualY = ay + cpy * actorH * (1 - cs) + cty + extT * cs;
+                const curTx = windowActor.translation_x;
+                const curTy = windowActor.translation_y;
+                const visualX = ax + cpx * actorW * (1 - cs) + curTx + extL * cs;
+                const visualY = ay + cpy * actorH * (1 - cs) + curTy + extT * cs;
                 startPivotX = 0;
                 startPivotY = 0;
                 startScale = cs;
@@ -469,14 +471,17 @@ export const MiniatureManager = GObject.registerClass({
                 duration = 250;
             }
 
+            // Set kind after remove_all_transitions: create's onStopped fires synchronously during
+            // that call and unconditionally removes MINIATURE_ANIM_KIND, so setting before would
+            // be overwritten. Setting after is safe because onStopped has already run by this point.
             windowActor.remove_all_transitions();
-            // Set AFTER remove_all_transitions: create's onStopped (if fired) removes MINIATURE_ANIM_KIND.
             WindowState.set(window, MINIATURE_ANIM_KIND, 'restore');
 
             windowActor.set_pivot_point(startPivotX, startPivotY);
             windowActor.set_scale(startScale, startScale);
             windowActor.set_translation(startTx, startTy, 0);
 
+            // Activate before ease so the window gains focus at animation start, not after.
             if (activate) window.activate(global.get_current_time());
 
             windowActor.ease({
