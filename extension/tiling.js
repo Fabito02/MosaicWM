@@ -2940,61 +2940,63 @@ class WindowDescriptor {
     }
 }
 
-function Level(work_area) {
-    this.x = 0;
-    this.y = 0;
-    this.width = 0;
-    this.height = 0;
-    this.windows = [];
-    this.work_area = work_area;
+class Level {
+    constructor(work_area) {
+        this.x = 0;
+        this.y = 0;
+        this.width = 0;
+        this.height = 0;
+        this.windows = [];
+        this.work_area = work_area;
+    }
+
+    draw_horizontal(meta_windows, work_area, y, masks, isDragging, drawingManager, dryRun = false, slotsOut = null) {
+        let x = this.x;
+        for(const window of this.windows) {
+            const center_offset = (work_area.height / 2 + work_area.y) - (y + window.height / 2);
+            let y_offset = 0;
+            if(center_offset > 0)
+                y_offset = Math.min(center_offset, this.height - window.height);
+
+            // Use targetX/targetY if set (for center-gravity alignment), otherwise use calculated position
+            const drawX = window.targetX !== undefined ? window.targetX : x;
+            const drawY = window.targetY !== undefined ? window.targetY : y + y_offset;
+
+            if (!dryRun)
+                Logger.log(`Window ${window.id} target: ${drawX},${drawY} (${window.width}x${window.height})`);
+
+            if (window.metaWindow) {
+                const slot = { x: drawX, y: drawY, width: window.width, height: window.height };
+                ComputedLayouts.set(window.metaWindow, slot);
+                if (slotsOut) slotsOut.set(window.metaWindow.get_id(), slot);
+            }
+
+            window.draw(meta_windows, drawX, drawY, masks, isDragging, drawingManager, dryRun);
+            x += window.width + constants.WINDOW_SPACING;
+        }
+    }
+
+    draw_vertical(meta_windows, x, masks, isDragging, drawingManager, dryRun = false, slotsOut = null) {
+        let y = this.y;
+        for(const window of this.windows) {
+            // Use targetX/targetY if set (for center-gravity alignment), otherwise use calculated position
+            const drawX = window.targetX !== undefined ? window.targetX : x;
+            const drawY = window.targetY !== undefined ? window.targetY : y;
+
+            if (!dryRun)
+                Logger.log(`Window ${window.id} target: ${drawX},${drawY} (${window.width}x${window.height})`);
+
+            if (window.metaWindow) {
+                const slot = { x: drawX, y: drawY, width: window.width, height: window.height };
+                ComputedLayouts.set(window.metaWindow, slot);
+                if (slotsOut) slotsOut.set(window.metaWindow.get_id(), slot);
+            }
+
+            window.draw(meta_windows, drawX, drawY, masks, isDragging, drawingManager, dryRun);
+            y += window.height + constants.WINDOW_SPACING;
+        }
+    }
 }
-
-Level.prototype.draw_horizontal = function(meta_windows, work_area, y, masks, isDragging, drawingManager, dryRun = false, slotsOut = null) {
-    let x = this.x;
-    for(const window of this.windows) {
-        const center_offset = (work_area.height / 2 + work_area.y) - (y + window.height / 2);
-        let y_offset = 0;
-        if(center_offset > 0)
-            y_offset = Math.min(center_offset, this.height - window.height);
-            
-        // Use targetX/targetY if set (for center-gravity alignment), otherwise use calculated position
-        const drawX = window.targetX !== undefined ? window.targetX : x;
-        const drawY = window.targetY !== undefined ? window.targetY : y + y_offset;
-        
-        if (!dryRun)
-            Logger.log(`Window ${window.id} target: ${drawX},${drawY} (${window.width}x${window.height})`);
-        
-        if (window.metaWindow) {
-            const slot = { x: drawX, y: drawY, width: window.width, height: window.height };
-            ComputedLayouts.set(window.metaWindow, slot);
-            if (slotsOut) slotsOut.set(window.metaWindow.get_id(), slot);
-        }
-
-        window.draw(meta_windows, drawX, drawY, masks, isDragging, drawingManager, dryRun);
-        x += window.width + constants.WINDOW_SPACING;
-    }
-};
-
-Level.prototype.draw_vertical = function(meta_windows, x, masks, isDragging, drawingManager, dryRun = false, slotsOut = null) {
-    let y = this.y;
-    for(const window of this.windows) {
-        // Use targetX/targetY if set (for center-gravity alignment), otherwise use calculated position
-        const drawX = window.targetX !== undefined ? window.targetX : x;
-        const drawY = window.targetY !== undefined ? window.targetY : y;
-        
-        if (!dryRun)
-            Logger.log(`Window ${window.id} target: ${drawX},${drawY} (${window.width}x${window.height})`);
-        
-        if (window.metaWindow) {
-            const slot = { x: drawX, y: drawY, width: window.width, height: window.height };
-            ComputedLayouts.set(window.metaWindow, slot);
-            if (slotsOut) slotsOut.set(window.metaWindow.get_id(), slot);
-        }
-
-        window.draw(meta_windows, drawX, drawY, masks, isDragging, drawingManager, dryRun);
-        y += window.height + constants.WINDOW_SPACING;
-    }
-};
 
 class Mask {
     constructor(window) {
