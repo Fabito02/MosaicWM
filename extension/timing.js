@@ -32,11 +32,15 @@ export class TimeoutRegistry {
         this._nextId = 1;
     }
 
+    // Sources stay registered while the callback returns GLib.SOURCE_CONTINUE,
+    // so clearAll() on disable can remove recurring polls too.
     add(delay, callback, name = 'unnamed') {
         const registryId = this._nextId++;
         const sourceId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
-            this._timeouts.delete(registryId);
-            return callback();
+            const again = callback() === GLib.SOURCE_CONTINUE;
+            if (!again)
+                this._timeouts.delete(registryId);
+            return again;
         });
         this._timeouts.set(registryId, { sourceId, name });
         return registryId;
@@ -45,8 +49,10 @@ export class TimeoutRegistry {
     addIdle(callback, name = 'unnamed', priority = GLib.PRIORITY_DEFAULT) {
         const registryId = this._nextId++;
         const sourceId = GLib.idle_add(priority, () => {
-            this._timeouts.delete(registryId);
-            return callback();
+            const again = callback() === GLib.SOURCE_CONTINUE;
+            if (!again)
+                this._timeouts.delete(registryId);
+            return again;
         });
         this._timeouts.set(registryId, { sourceId, name });
         return registryId;
@@ -55,8 +61,10 @@ export class TimeoutRegistry {
     addSeconds(seconds, callback, name = 'unnamed') {
         const registryId = this._nextId++;
         const sourceId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, seconds, () => {
-            this._timeouts.delete(registryId);
-            return callback();
+            const again = callback() === GLib.SOURCE_CONTINUE;
+            if (!again)
+                this._timeouts.delete(registryId);
+            return again;
         });
         this._timeouts.set(registryId, { sourceId, name });
         return registryId;
@@ -225,16 +233,25 @@ export function afterOverviewHidden(callback, registry) {
     }
     
     Logger.log('Waiting for overview to hide...');
-    
+
+    // 'done' guards against double execution: without it, the failsafe could
+    // re-run the callback if the user reopened the overview within 1s.
+    let done = false;
+    let timeoutId = null;
+
     const hiddenId = Main.overview.connect('hidden', () => {
+        if (done) return;
+        done = true;
         Main.overview.disconnect(hiddenId);
+        if (timeoutId !== null) registry.remove(timeoutId);
         Logger.log('Overview hidden - executing callback');
         callback();
     });
-    
+
     // Failsafe: if overview doesn't hide within 1s, execute anyway
-    registry.add(1000, () => {
-        if (Main.overview.visible) {
+    timeoutId = registry.add(1000, () => {
+        if (!done) {
+            done = true;
             Logger.log('Overview hide timeout - forcing callback');
             try { Main.overview.disconnect(hiddenId); } catch(_e) {}
             callback();
