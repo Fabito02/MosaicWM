@@ -100,24 +100,6 @@ export const WindowingManager = GObject.registerClass({
         return _windows;
     }
 
-    moveBackWindow(window) {
-        const workspace = window.get_workspace();
-        const active = global.workspace_manager.get_active_workspace() === workspace;
-        const previous_workspace = workspace.get_neighbor(Meta.MotionDirection.LEFT);
-
-        if (!previous_workspace) {
-            Logger.error('There is no workspace to the left.');
-            return;
-        }
-        
-        window.change_workspace(previous_workspace);
-        if (active) {
-            previous_workspace.activate(this.getTimestamp());
-            this.showWorkspaceSwitcher(previous_workspace, window.get_monitor());
-        }
-        return previous_workspace;
-    }
-
     // Attempts to tile a window with an existing edge-tiled window
     tryTileWithSnappedWindow(window, edgeTiledWindow, previousWorkspace) {
         if (!this._edgeTilingManager) {
@@ -185,7 +167,7 @@ export const WindowingManager = GObject.registerClass({
                 this._edgeTilingManager.setupResizeListener(window);
             }
             
-            this._edgeTilingManager.registerAutoTileDependency(window.get_id(), edgeTiledWindow.get_id());
+            this._edgeTilingManager.registerAutoTileDependency(window, edgeTiledWindow);
             
             Logger.log(`Successfully dual-tiled window ${window.get_wm_class()} to ${direction} (${targetWidth}x${targetHeight})`);
             return true;
@@ -372,17 +354,16 @@ export const WindowingManager = GObject.registerClass({
         }
 
         // 1×1 XWayland utility windows (clipboard helpers) must not enter the layout.
-        const frame = meta_window.get_frame_rect();
-        if (frame.width <= 1 && frame.height <= 1) {
-            return true;
+        // get_frame_rect on a disposed MetaWindow segfaults libmutter, so only
+        // read it while the window is alive (dead windows keep prior semantics).
+        if (isWindowAlive(meta_window)) {
+            const frame = meta_window.get_frame_rect();
+            if (frame.width <= 1 && frame.height <= 1) {
+                return true;
+            }
         }
 
         return false;
-    }
-
-    isExcludedByID(id) {
-        const window = global.display.list_all_windows().find(w => w.get_id() === id);
-        return window ? this.isExcluded(window) : true;
     }
 
     isRelated(meta_window) {
@@ -522,5 +503,10 @@ export const WindowingManager = GObject.registerClass({
     destroy() {
         this._edgeTilingManager = null;
         this._animationsManager = null;
+        this._tilingManager = null;
+        this._timeoutRegistry = null;
+        this._overflowStartCallback = null;
+        this._overflowEndCallback = null;
+        this._windowsCache = new WeakMap();
     }
 });
