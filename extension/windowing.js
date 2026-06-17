@@ -410,9 +410,8 @@ export const WindowingManager = GObject.registerClass({
         this._timeoutRegistry.addIdle(() => {
             const workspaceManager = global.workspace_manager;
 
-            // workspace.index() asserts in libmutter if GNOME already auto-removed
-            // this (now-empty) workspace from the manager before this idle ran -
-            // check membership by reference instead of calling the native lookup.
+            // This workspace might already be gone by the time this idle runs,
+            // and workspace.index() crashes on a removed one, so check manually.
             let currentIndex = -1;
             for (let i = 0; i < workspaceManager.get_n_workspaces(); i++) {
                 if (workspaceManager.get_workspace_by_index(i) === workspace) {

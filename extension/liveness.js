@@ -9,10 +9,8 @@ export function isWindowAlive(window) {
     return !!actor && !actor.is_destroyed();
 }
 
-// workspace.index() asserts in libmutter (meta_workspace_index: assertion 'ret >= 0'
-// failed) if GNOME's dynamic-workspace system already removed this workspace from the
-// manager, since the JS wrapper can outlive that removal. Check membership by reference
-// instead of calling the native index lookup on a possibly-stale workspace.
+// workspace.index() crashes if GNOME already removed this workspace, so check
+// it's still in the manager's list instead of calling the native lookup.
 export function isWorkspaceAlive(workspace, workspaceManager = global.workspace_manager) {
     if (!workspace) return false;
     for (let i = 0; i < workspaceManager.get_n_workspaces(); i++) {

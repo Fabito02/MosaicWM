@@ -228,10 +228,9 @@ export const ResizeHandler = GObject.registerClass({
                     WindowState.set(window, 'actualMinWidth', rect.width);
                     WindowState.set(window, 'actualMinHeight', rect.height);
 
-                    // A window that was just placed by Smart Resize/sacred-restore can clamp
-                    // by a few px against its own minimum size. Rebalancing immediately races
-                    // the placement's own settling tiling pass and can re-eject the window it
-                    // just finished placing. Let it settle before reacting to the clamp.
+                    // A window we just placed can clamp a few px against its own minimum.
+                    // Rebalancing right away races the tiling pass that's still settling
+                    // it and can kick it right back out, so give it a moment first.
                     const now = GLib.get_monotonic_time() / 1000;
                     if (!this._resizeGracePeriod || (now - this._resizeGracePeriod) >= constants.REVERSE_RESIZE_PROTECTION_MS) {
                         this._queueConstraintRebalance(window);
@@ -491,9 +490,8 @@ export const ResizeHandler = GObject.registerClass({
         this._ext = null;
     }
 
-    // Schedule a fallback in case Mutter never fires the real size-changed
-    // confirmation (e.g. a rapid maximize/unmaximize toggle) - without this,
-    // the window would stay stranded on the isolated workspace forever.
+    // Mutter can skip firing size-changed on a fast toggle, leaving the window
+    // stuck on the isolated workspace if nothing else nudges it.
     scheduleSacredRestoreSafety(window, originWorkspaceIndex) {
         this._timeoutRegistry.add(constants.SACRED_RESTORE_SAFETY_TIMEOUT_MS, () => {
             if (WindowState.get(window, 'isRestoringSacred') === originWorkspaceIndex) {
@@ -504,9 +502,8 @@ export const ResizeHandler = GObject.registerClass({
         }, 'resizeHandler_sacredRestoreSafety');
     }
 
-    // STATE MACHINE STAGE 2: Deferred Move Completion. Callable from either the
-    // real signal or the safety-timeout fallback above; idempotent, since the
-    // flag clear below means a racing signal/timeout pair can only run once.
+    // Clearing the flag below makes this safe to call twice, since the real
+    // signal and the timeout above can both end up calling it.
     completeSacredReturn(window, originWorkspaceIndex) {
         if (WindowState.get(window, 'isRestoringSacred') !== originWorkspaceIndex) return;
 
@@ -523,9 +520,8 @@ export const ResizeHandler = GObject.registerClass({
         const originWS = workspaceManager.get_workspace_by_index(originWorkspaceIndex);
         const monitor = window.get_monitor();
         const oldWorkspace = window.get_workspace();
-        // Set by handleUnmaximizeUndo when it already verified the window
-        // fits at the destination (with or without Smart Resize) - lets the
-        // destination tile pass below settle it without re-litigating overflow.
+        // handleUnmaximizeUndo sets this once it already checked the window
+        // fits, so the tile pass below doesn't second-guess it as overflow.
         const fitConfirmed = WindowState.get(window, 'sacredFitConfirmed') === true;
         const pendingMiniatures = WindowState.get(window, 'pendingMiniaturesForReturn') || [];
 
@@ -553,8 +549,8 @@ export const ResizeHandler = GObject.registerClass({
                 this.tilingManager.tileWorkspaceWindows(oldWorkspace, null, monitor, true);
             }
 
-            // Protect the just-placed window from an immediate rebalance if its
-            // resize clamps slightly against client minimums (see clamp handling above).
+            // Same clamp protection as above, so this window doesn't get
+            // rebalanced right after it just landed.
             this._resizeGracePeriod = GLib.get_monotonic_time() / 1000;
 
             // Clear unmaximizing flags after a settle period
@@ -645,10 +641,9 @@ export const ResizeHandler = GObject.registerClass({
             WindowState.set(window, 'preferredSize', preMaxSize);
         }
 
-        // Defer the cross-workspace move to the signal-driven STAGE 2 handler in
-        // onSizeChanged below - it waits for the real size-changed confirmation
-        // that unmaximize() has settled, instead of guessing with a fixed timer
-        // (which could move the window mid-transition, still at its sacred size).
+        // Wait for the real size-changed confirmation instead of guessing with
+        // a timer - a fixed delay could move the window before it's actually
+        // done resizing, and it'd show up at the destination still huge.
         WindowState.set(window, 'isRestoringSacred', origIndex);
         WindowState.set(window, 'sacredFitConfirmed', true);
         if (pendingMiniatures.length > 0) {

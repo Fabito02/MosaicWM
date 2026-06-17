@@ -41,10 +41,12 @@ export const GEOMETRY_WAIT_MAX_ATTEMPTS = 100;   // Max attempts to wait for win
 export const REVERSE_RESIZE_PROTECTION_MS = 1000; // Protection window for reverse smart resize/unmaximize/overflow
 export const RESIZE_SETTLE_DELAY_MS = 150;       // Delay to let Mutter apply resize before retiling
 export const ISRESIZING_FLAG_RESET_MS = 2;       // Delay to reset isResizing flag
-// Fallback for the sacred-restore deferred move: if a rapid maximize/unmaximize
-// toggle leaves Mutter never confirming the unmaximize via size-changed, force
-// the move anyway rather than leaving the window stuck on the isolated workspace.
+// Mutter can skip the size-changed confirmation on a fast maximize/unmaximize
+// toggle, so force the move after this long instead of leaving the window stuck.
 export const SACRED_RESTORE_SAFETY_TIMEOUT_MS = 1500;
+// New windows fire both window-created and window-added, which would otherwise
+// evaluate them twice. Skip a re-enqueue if we just evaluated this window.
+export const DUPLICATE_EVALUATION_WINDOW_MS = 300;
 
 // Threshold for identifying significant changes in window geometry for animations
 export const ANIMATION_DIFF_THRESHOLD = 10;

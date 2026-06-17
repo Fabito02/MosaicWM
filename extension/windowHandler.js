@@ -561,9 +561,8 @@ export const WindowHandler = GObject.registerClass({
         }
     }
 
-    // Auto-restore the oldest miniature when a sibling's removal frees up space.
-    // Shared by the close path (onWindowDestroyed) and the cross-workspace-move
-    // path (onWindowRemoved); only restores if the layout still fits naturally.
+    // Tries to bring back the oldest miniature when space frees up. Shared by
+    // the close and move paths so they don't duplicate the fit check.
     _tryAutoRestoreMiniature(remainingWindows, workspace, monitor) {
         if (!this._ext.miniatureManager) return false;
 
@@ -626,8 +625,8 @@ export const WindowHandler = GObject.registerClass({
                     const remainingWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor)
                         .filter(w => !this.edgeTilingManager.isEdgeTiled(w) && !this.windowingManager.isExcluded(w));
 
-                    // Auto-restore a miniature first - if it absorbed the freed space,
-                    // skip the size-restore pass below (its own retile will follow).
+                    // Try the miniature first - if it eats the freed space, skip the
+                    // size-restore below.
                     if (this._tryAutoRestoreMiniature(remainingWindows, workspace, monitor)) return;
 
                     // Try to restore/reverse smart resize constrained windows with freed space.
@@ -696,6 +695,13 @@ export const WindowHandler = GObject.registerClass({
             Logger.log(`Skipping duplicate enqueue for window ${windowId}`);
             return;
         }
+        // window-created and window-added both land here for a new window, so
+        // skip if we just evaluated it.
+        const lastEvaluatedAt = WindowState.get(window, 'lastEvaluatedAt');
+        if (lastEvaluatedAt && (Date.now() - lastEvaluatedAt) < constants.DUPLICATE_EVALUATION_WINDOW_MS) {
+            Logger.log(`Skipping re-enqueue for window ${windowId} - evaluated ${Date.now() - lastEvaluatedAt}ms ago`);
+            return;
+        }
         Logger.log(`Enqueueing window ${windowId} for evaluation`);
         WindowState.set(window, 'pendingInQueue', true);
         this._evaluationQueue.push({ window, workspace, monitor });
@@ -725,6 +731,7 @@ export const WindowHandler = GObject.registerClass({
         while (this._evaluationQueue.length > 0) {
             let { window, workspace, monitor } = this._evaluationQueue.shift();
             WindowState.remove(window, 'pendingInQueue');
+            WindowState.set(window, 'lastEvaluatedAt', Date.now());
 
             if (!isWindowAlive(window)) {
                 Logger.log('Evaluation queue: window destroyed before evaluation, skipping');
@@ -1281,7 +1288,7 @@ export const WindowHandler = GObject.registerClass({
                     const workArea = this._ext.tilingManager.getUsableWorkArea(WORKSPACE, MONITOR);
                     // Pass ALL remaining windows (including minis) so the fit simulation in
                     // findBestRestorationGain accounts for the space miniatures occupy.
-                    Logger.log(`[REVERSE-REMOVED] Window removed - attempting reverse smart resize`);
+                    Logger.log('[REVERSE-REMOVED] Window removed - attempting reverse smart resize');
                     const restored = this._ext.tilingManager.tryRestoreWindowSizes(remainingWindows, workArea, null, null, WORKSPACE, MONITOR);
 
                     if (restored) {
