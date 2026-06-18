@@ -555,7 +555,7 @@ export default class WindowMosaicExtension extends Extension {
                 !this.windowingManager.isMaximizedOrFullscreen(w)
             );
 
-        // Treat the restored window as the user-focused one — Mutter's focus
+        // Treat the restored window as the user-focused one, since Mutter's focus
         // hasn't shifted yet (window.activate runs after the 250ms animation),
         // so the previously-focused sibling would otherwise be excluded from
         // miniaturization candidates and nothing would shrink.
@@ -575,10 +575,26 @@ export default class WindowMosaicExtension extends Extension {
             } else {
                 this.tilingManager.tileWorkspaceWindows(workspace, window, monitor, false);
             }
+
+            // restoreMiniature only undoes the scale, not the frame. If this was last
+            // shrunk via Smart Resize's skip-resize miniaturize path, the real frame
+            // is still pre-restore size, so give reverse smart resize a chance to grow it back.
+            const allWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor)
+                .filter(w => !this.edgeTilingManager.isEdgeTiled(w) && !this.windowingManager.isExcluded(w));
+            const grew = this.tilingManager.tryRestoreWindowSizes(allWindows, workArea, null, null, workspace, monitor);
+            if (grew) {
+                this._timeoutRegistry.add(constants.RESIZE_SETTLE_DELAY_MS, () => {
+                    for (const w of allWindows) {
+                        WindowState.remove(w, 'isReverseSmartResizing');
+                    }
+                    this.tilingManager.tileWorkspaceWindows(workspace, null, monitor, true);
+                    return GLib.SOURCE_REMOVE;
+                }, 'miniatureRestoreGrowSettle');
+            }
         };
 
         // When the overview is active, tiling with pending miniatures must wait
-        // until after the exit animation — overview.hide fires before
+        // until after the exit animation, since overview.hide fires before
         // notify::focus-window on Wayland, so _isOverviewActive is still true
         // here. Running cascade with animate=true only after 'hidden' ensures a
         // smooth miniaturization rather than an instant snap.
@@ -737,12 +753,12 @@ export default class WindowMosaicExtension extends Extension {
         }
 
         if (this.miniatureManager) {
-            // Disconnect listener first — otherwise restoreMiniature re-enters
+            // Disconnect listener first, otherwise restoreMiniature re-enters
             // _onMiniatureRestored, scheduling timeouts that fire after windowHandler is nulled.
             if (this._miniatureRestoredId)
                 this.miniatureManager.disconnect(this._miniatureRestoredId);
             this._miniatureRestoredId = 0;
-            // Restore miniatures to full size — otherwise users see scaled, click-dead windows post-disable.
+            // Restore miniatures to full size, otherwise users see scaled, click-dead windows post-disable.
             this.miniatureManager.restoreAllMiniatures();
             this.miniatureManager.destroy();
             this.miniatureManager = null;
@@ -787,7 +803,7 @@ export default class WindowMosaicExtension extends Extension {
         this._workspaceManEventIds = [];
         this._workspaceEventIds = [];
 
-        // Clean up handler classes BEFORE nulling shared refs — their destroy()
+        // Clean up handler classes before nulling shared refs, since their destroy()
         // reaches the timeout registry through the extension reference.
         if (this.resizeHandler) this.resizeHandler.destroy();
         if (this.dragHandler) this.dragHandler.destroy();
