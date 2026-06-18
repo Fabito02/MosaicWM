@@ -471,7 +471,7 @@ export const MiniatureManager = GObject.registerClass({
             let startPivotX, startPivotY, startScale, startTx, startTy, duration;
 
             if (kind === 'create') {
-                // Interrupted miniaturize — read current visual frame origin before canceling
+                // Interrupted miniaturize, read current visual frame origin before canceling
                 const [cpx, cpy] = windowActor.get_pivot_point();
                 const cs = windowActor.scale_x;
                 const curTx = windowActor.translation_x;
@@ -509,6 +509,42 @@ export const MiniatureManager = GObject.registerClass({
             // Activate before ease so the window gains focus at animation start, not after.
             if (activate) window.activate(global.get_current_time());
 
+            // A retile can interrupt this mid-flight (it shares the actor with
+            // animateWindow's own position ease). Rather than snap to full size,
+            // pick the scale-up back up from wherever it got cut off - position is
+            // already handed off to whatever interrupted us by this point.
+            const continueScaleUp = (isFinished) => {
+                if (!windowActor || windowActor.is_destroyed()) return;
+
+                if (!isFinished) {
+                    if (WindowState.get(window, IS_MINIATURE)) return;
+                    if (Math.abs(windowActor.scale_x - 1.0) < 0.001 && Math.abs(windowActor.scale_y - 1.0) < 0.001) {
+                        if (WindowState.get(window, MINIATURE_ANIM_KIND) === 'restore')
+                            WindowState.remove(window, MINIATURE_ANIM_KIND);
+                        return;
+                    }
+                    windowActor.ease({
+                        scale_x: 1.0,
+                        scale_y: 1.0,
+                        duration,
+                        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                        onStopped: continueScaleUp,
+                    });
+                    return;
+                }
+
+                if (WindowState.get(window, MINIATURE_ANIM_KIND) === 'restore')
+                    WindowState.remove(window, MINIATURE_ANIM_KIND);
+                if (!WindowState.get(window, IS_MINIATURE)) {
+                    windowActor.set_pivot_point(0, 0);
+                    windowActor.set_scale(1.0, 1.0);
+                    windowActor.set_translation(0, 0, 0);
+                }
+                const [finalAx, finalAy] = windowActor.get_position();
+                const [finalW, finalH] = windowActor.get_size();
+                Logger.log(`[MINIATURE] restoreMiniature animation complete ${window.get_id()}: FINAL actor=(${finalAx},${finalAy} ${finalW}x${finalH})`);
+            };
+
             windowActor.ease({
                 scale_x: 1.0,
                 scale_y: 1.0,
@@ -516,18 +552,7 @@ export const MiniatureManager = GObject.registerClass({
                 translation_y: 0,
                 duration,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-                onStopped: () => {
-                    if (WindowState.get(window, MINIATURE_ANIM_KIND) === 'restore')
-                        WindowState.remove(window, MINIATURE_ANIM_KIND);
-                    if (!WindowState.get(window, IS_MINIATURE)) {
-                        windowActor.set_pivot_point(0, 0);
-                        windowActor.set_scale(1.0, 1.0);
-                        windowActor.set_translation(0, 0, 0);
-                    }
-                    const [finalAx, finalAy] = windowActor.get_position();
-                    const [finalW, finalH] = windowActor.get_size();
-                    Logger.log(`[MINIATURE] restoreMiniature animation complete ${window.get_id()}: FINAL actor=(${finalAx},${finalAy} ${finalW}x${finalH})`);
-                },
+                onStopped: continueScaleUp,
             });
         }
 
@@ -564,7 +589,7 @@ export const MiniatureManager = GObject.registerClass({
         WindowState.remove(window, MINIATURE_EXT_LEFT);
         WindowState.remove(window, MINIATURE_EXT_TOP);
 
-        // Destroy the click overlay — an orphaned reactive actor would capture clicks on a dead window.
+        // Destroy the click overlay, since an orphaned reactive actor would capture clicks on a dead window.
         const overlay = WindowState.get(window, MINIATURE_OVERLAY);
         if (overlay) {
             overlay.destroy();
@@ -591,7 +616,7 @@ export const MiniatureManager = GObject.registerClass({
     }
 
     // Hard-restore every miniature back to full size. Used by disable() to
-    // leave a clean slate — the next enable() rebuilds via enforceWorkspaceFit.
+    // leave a clean slate, since the next enable() rebuilds via enforceWorkspaceFit.
     restoreAllMiniatures() {
         const windows = global.display.get_tab_list(Meta.TabList.NORMAL, null)
             .filter(w => WindowState.get(w, IS_MINIATURE));
