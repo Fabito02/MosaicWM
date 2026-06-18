@@ -45,7 +45,7 @@ export const ResizeHandler = GObject.registerClass({
     _queueConstraintRebalance(window) {
         if (this._constraintRebalanceQueued) return;
 
-        // Suppress rebalance during queue evaluation — the queue handles its own overflow
+        // Suppress rebalance during queue evaluation, since the queue handles its own overflow
         if (this._ext.windowHandler && this._ext.windowHandler.isEvaluatingQueue) return;
 
         this._constraintRebalanceCount = (this._constraintRebalanceCount || 0) + 1;
@@ -262,7 +262,7 @@ export const ResizeHandler = GObject.registerClass({
         if (!this._sizeChanged && !this.windowingManager.isExcluded(window)) {
             if (!this.windowingManager.isRelated(window)) return;
 
-            // Windows pending in the evaluation queue haven't been processed yet — ignore size changes
+            // Windows pending in the evaluation queue haven't been processed yet, so ignore size changes
             if (WindowState.get(window, 'pendingInQueue')) return;
 
             const rect = window.get_frame_rect();
@@ -349,7 +349,18 @@ export const ResizeHandler = GObject.registerClass({
                 }
             }
             
-            if (userForcedResize) {
+            // Mirrors savePreferredSize's guard: a born-maximized window mid-unmaximize can
+            // report its still-fullscreen frame here before tiling shrinks it, baking it in
+            // as preferredSize and making the window read as workspace-filling forever.
+            const sizeWorkspace = window.get_workspace();
+            const sizeMonitor = window.get_monitor();
+            const sizeWorkArea = sizeWorkspace && sizeMonitor !== null && sizeMonitor !== undefined
+                ? sizeWorkspace.get_work_area_for_monitor(sizeMonitor) : null;
+            const isMonitorSized = sizeWorkArea && rect.width >= sizeWorkArea.width && rect.height >= sizeWorkArea.height;
+
+            if (isMonitorSized) {
+                Logger.log(`onSizeChanged: Rejected monitor-sized dimensions ${rect.width}x${rect.height} for ${window.get_id()}`);
+            } else if (userForcedResize) {
                 // Manual resize always updates preferredSize and clears constraints
                 WindowState.set(window, 'preferredSize', { width: rect.width, height: rect.height });
                 if (isConstrained) {
@@ -676,7 +687,7 @@ export const ResizeHandler = GObject.registerClass({
             const fitResult = this.tilingManager.tryFitWithResize(window, existingWindows, targetWorkspace.get_work_area_for_monitor(monitor), window);
             canFit = fitResult?.success ?? false;
             resizeNeeded = canFit;
-            // Pending minis MUST reach the tile pass — skipping leaves siblings at miniature size with no real miniature.
+            // Pending minis MUST reach the tile pass, since skipping leaves siblings at miniature size with no real miniature.
             if (canFit) {
                 pendingMiniatures = fitResult.pendingWindows ?? [];
                 // Set early: intermediate tile calls treat these as pending-mini; afterWorkspaceSwitch re-sets before final pass.

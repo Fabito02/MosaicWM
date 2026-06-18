@@ -288,6 +288,21 @@ export const WindowHandler = GObject.registerClass({
                         WindowState.remove(win, 'isEnteringSacred');
                         const ws = win.get_workspace();
                         const mon = win.get_monitor();
+                        // Only capture if nothing's recorded yet, so a later manual resize or
+                        // Smart Resize decision is never clobbered.
+                        if (!WindowState.get(win, 'preferredSize')) {
+                            const settled = win.get_frame_rect();
+                            const wa = ws && mon !== null ? ws.get_work_area_for_monitor(mon) : null;
+                            const isMonitorSized = wa && settled.width >= wa.width && settled.height >= wa.height;
+                            // No saved_rect means Mutter's unmaximize leaves the frame at the literal
+                            // monitor size, indistinguishable from maximized. Use 95% of the work
+                            // area instead so it reads as "nearly full" rather than maximized.
+                            const size = isMonitorSized
+                                ? { width: Math.floor(wa.width * 0.95), height: Math.floor(wa.height * 0.95) }
+                                : { width: settled.width, height: settled.height };
+                            WindowState.set(win, 'preferredSize', size);
+                            Logger.log(`Captured preferredSize on unmaximize for ${win.get_id()}: ${size.width}x${size.height}${isMonitorSized ? ' (95% fallback, no real shrink)' : ''}`);
+                        }
                         if (ws) this.tilingManager.tileWorkspaceWindows(ws, win, mon);
                     } else {
                         this._ext.resizeHandler.tryExitSacred(win);
@@ -310,18 +325,28 @@ export const WindowHandler = GObject.registerClass({
                 WindowState.remove(win, 'isEnteringSacred');
                 const ws = win.get_workspace();
                 const mon = win.get_monitor();
+                if (!WindowState.get(win, 'preferredSize')) {
+                    const settled = win.get_frame_rect();
+                    const wa = ws && mon !== null ? ws.get_work_area_for_monitor(mon) : null;
+                    const isMonitorSized = wa && settled.width >= wa.width && settled.height >= wa.height;
+                    const size = isMonitorSized
+                        ? { width: Math.floor(wa.width * 0.95), height: Math.floor(wa.height * 0.95) }
+                        : { width: settled.width, height: settled.height };
+                    WindowState.set(win, 'preferredSize', size);
+                    Logger.log(`Captured preferredSize on unfullscreen for ${win.get_id()}: ${size.width}x${size.height}${isMonitorSized ? ' (95% fallback, no real shrink)' : ''}`);
+                }
                 if (ws) this.tilingManager.tileWorkspaceWindows(ws, win, mon);
             } else {
                 this._ext.resizeHandler.tryExitSacred(win);
             }
         }));
 
-        // Smart resize completion — clear bridge state and retile
+        // Smart resize completion: clear bridge state and retile
         ids.push(window.connect('size-changed', (win) => {
             ComputedLayouts.delete(win);
             if (WindowState.get(win, 'isSmartResizing') || WindowState.get(win, 'isReverseSmartResizing')) {
-                // During queue evaluation, skip ALL processing — preserve target sizes
-                // so subsequent canFitWindow/tryFitWithResize calls see consistent state
+                // During queue evaluation, skip all processing so target sizes stay
+                // consistent for subsequent canFitWindow/tryFitWithResize calls
                 if (this._isEvaluatingQueue) return;
                 const target = WindowState.get(win, 'targetSmartResizeSize');
                 if (target)
