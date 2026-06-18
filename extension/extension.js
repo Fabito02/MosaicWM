@@ -175,8 +175,8 @@ export default class WindowMosaicExtension extends Extension {
         this._workspaceEventIds.push([workspace, eventIds]);
     };
 
-    // Drop bookkeeping for destroyed workspaces — their signals die with the
-    // object, and disconnecting them on disable() would target a dead GObject.
+    // Drop bookkeeping for destroyed workspaces, since their signals die with
+    // the object, and disconnecting them on disable() would target a dead GObject.
     _workspaceRemovedSignal = () => {
         this._workspaceEventIds = this._workspaceEventIds.filter(([workspace]) => isWorkspaceAlive(workspace, this._workspaceManager));
     };
@@ -190,7 +190,7 @@ export default class WindowMosaicExtension extends Extension {
 
         // SettingsOverrider already handles a stale override from a previous
         // crash (it restores the schema default when the current value equals
-        // the override) — forcing the value here would clobber a user who
+        // the override). Forcing the value here would clobber a user who
         // legitimately disabled attach-modal-dialogs.
         this._mutterSettings = new Gio.Settings({ schema_id: 'org.gnome.mutter' });
 
@@ -242,6 +242,7 @@ export default class WindowMosaicExtension extends Extension {
 
         this.miniatureManager = new MiniatureManager();
         this.miniatureManager.setTimeoutRegistry(this._timeoutRegistry);
+        this.miniatureManager.setAnimationsManager(this.animationsManager);
         this._miniatureCascadeIds = new Set();
         this._lastFocusedWindowId = null;
 
@@ -293,7 +294,7 @@ export default class WindowMosaicExtension extends Extension {
         // actor has set_scale + set_translation applied to visually shrink and
         // reposition the frame content at MINIATURE_TARGET_POS. However,
         // Clutter.Clone disables the source actor’s model-view transform during
-        // clone paint — so set_scale/set_translation on the source are ignored.
+        // clone paint, so set_scale/set_translation on the source are ignored.
         // The clone paints the source at full size with scale=1.
         //
         // We must apply the miniature scale directly on the clone (set_scale)
@@ -302,10 +303,10 @@ export default class WindowMosaicExtension extends Extension {
         //
         // InjectionManager.overrideMethod does NOT work for GObject.registerClass
         // methods (resolved via vtable, not JS prototype). Direct prototype
-        // replacement of _init DOES work — confirmed by the static-workspace-background
+        // replacement of _init DOES work, confirmed by the static-workspace-background
         // extension pattern.
         //
-        // TODO: Contribute upstream to gnome-shell/js/ui/workspaceAnimation.js —
+        // TODO: Contribute upstream to gnome-shell/js/ui/workspaceAnimation.js:
         // _createClone should propagate the source actor’s scale and position the
         // clone at the visual frame location, not the raw actor position. This
         // would allow extensions that use actor transforms (tiling WMs, magnifiers,
@@ -353,7 +354,7 @@ export default class WindowMosaicExtension extends Extension {
         // position" to "miniature-size slot from MosaicLayoutStrategy", making
         // the miniature visually pop back to full size during the transition.
         //
-        // TODO: Contribute upstream — Shell.WindowPreviewLayout should propagate
+        // TODO: Contribute upstream: Shell.WindowPreviewLayout should propagate
         // the source actor's scale (and account for actor translation) when
         // computing its bounding box. Extensions using actor transforms (tiling
         // WMs, magnifiers, etc.) would then work with the native overview

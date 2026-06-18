@@ -379,6 +379,10 @@ export const DragHandler = GObject.registerClass({
                         const endTx = slot.x - actorX - px * dw - extLeft * scale;
                         const endTy = slot.y - actorY - py * dh - extTop * scale;
                         actor.set_pivot_point(px, py);
+                        // Same leak as miniature.js's createMiniature: a tile animation may still be
+                        // in flight here, and nothing else would clear it from AnimationsManager's
+                        // tracking once this preview ease takes over.
+                        this.animationsManager?.removeAnimatingWindow(win.get_id());
                         actor.remove_all_transitions();
                         // No set_translation reset: preserves draw()'s compensation offset to avoid a visual jump.
                         actor.ease({

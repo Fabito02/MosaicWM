@@ -104,7 +104,7 @@ export function animateMiniatureToTarget(actor, window, scale, extLeft, extTop, 
  * Mutter may reset actor transforms internally (workspace switch animation,
  * sync_window_geometry, etc.) without emitting GObject signals. This effect
  * runs as part of the paint pipeline, guaranteeing correct transforms are
- * applied before the actor is rendered — every frame, no race conditions.
+ * applied before the actor is rendered, every frame, with no race conditions.
  */
 const MiniatureEnforceEffect = GObject.registerClass({
     GTypeName: 'MosaicMiniatureEnforceEffect',
@@ -117,7 +117,7 @@ const MiniatureEnforceEffect = GObject.registerClass({
     vfunc_paint(...args) {
         const actor = this.get_actor();
         if (!actor || !WindowState.get(this._window, IS_MINIATURE)) {
-            // Not a miniature anymore — just paint normally
+            // Not a miniature anymore, just paint normally
             super.vfunc_paint(...args);
             return;
         }
@@ -252,15 +252,25 @@ export const MiniatureManager = GObject.registerClass({
         super._init();
         this._miniatureWindows = new Set();
         this._timeoutRegistry = null;
+        this._animationsManager = null;
     }
 
     setTimeoutRegistry(registry) {
         this._timeoutRegistry = registry;
     }
 
+    setAnimationsManager(animationsManager) {
+        this._animationsManager = animationsManager;
+    }
+
     createMiniature(window, computedSlot, forcedPreSize = null, { animate = true } = {}) {
         const windowActor = window.get_compositor_private();
         if (!windowActor) return false;
+
+        // animateWindow's onStopped(false) leaves the window in AnimationsManager's tracking,
+        // expecting a new animateWindow call to clean up - but a miniature ease takes over
+        // instead, so nothing else would, and 'animations-completed' would never fire again.
+        this._animationsManager?.removeAnimatingWindow(window.get_id());
 
         const preSize = forcedPreSize || window.get_frame_rect();
         const scale = constants.MINIATURE_TARGET_SIZE_PX / Math.max(preSize.width, preSize.height);
