@@ -92,6 +92,12 @@ export const TilingManager = GObject.registerClass({
         this._animationsManager = manager;
     }
 
+    // Smart Resize sites only ever change width/height at the window's current
+    // position, so x/y always come from the frame already read at the call site.
+    _animateResize(window, frame, width, height) {
+        this._animationsManager?.animateWindow(window, { x: frame.x, y: frame.y, width, height });
+    }
+
     setWindowingManager(manager) {
         this._windowingManager = manager;
     }
@@ -2369,10 +2375,10 @@ export const TilingManager = GObject.registerClass({
                 if (w) {
                     if (WindowState.get(w, IS_MINIATURE)) continue;
                     WindowState.set(w, 'isReverseSmartResizing', true);
-                    
-                    // Direct resize without animation for now to ensure stability
-                    w.move_resize_frame(false, w.get_frame_rect().x, w.get_frame_rect().y, sim.width, sim.height);
-                    
+
+                    const frame = w.get_frame_rect();
+                    this._animateResize(w, frame, sim.width, sim.height);
+
                     const shrunk = shrunkWindows.find(sw => sw.id === w.get_id());
                     if (shrunk) {
                         // If fully restored (allow for small pixel rounding errors), remove constraint
@@ -2711,7 +2717,7 @@ export const TilingManager = GObject.registerClass({
                         WindowState.set(w, 'isConstrainedByMosaic', false);
                         WindowState.set(w, 'targetSmartResizeSize', null);
                         WindowState.set(w, 'targetRestoredSize', { width: d.current.width, height: d.current.height });
-                        w.move_resize_frame(false, frame.x, frame.y, d.current.width, d.current.height);
+                        this._animateResize(w, frame, d.current.width, d.current.height);
                         grownWindows.push(w);
                         Logger.log(`[SMART RESIZE] ${sim.id}: grow back ${frame.width}×${frame.height} → ${d.current.width}×${d.current.height}`);
                     }
@@ -2731,7 +2737,7 @@ export const TilingManager = GObject.registerClass({
                     continue;
                 }
 
-                w.move_resize_frame(false, frame.x, frame.y, sim.width, sim.height);
+                this._animateResize(w, frame, sim.width, sim.height);
                 Logger.log(`[SMART RESIZE] ${sim.id}: ${d.current.width}×${d.current.height} → ${sim.width}×${sim.height}`);
             }
 
@@ -2816,7 +2822,7 @@ export const TilingManager = GObject.registerClass({
                     if (!d.isResizable) continue;
                     const frame = w.get_frame_rect();
                     WindowState.set(w, 'isSmartResizing', true);
-                    w.move_resize_frame(false, frame.x, frame.y, d.current.width, d.current.height);
+                    this._animateResize(w, frame, d.current.width, d.current.height);
                     WindowState.set(w, 'isSmartResizing', false);
                     WindowState.set(w, 'targetSmartResizeSize', null);
                     WindowState.set(w, 'isConstrainedByMosaic', false);
@@ -2873,7 +2879,7 @@ export const TilingManager = GObject.registerClass({
                 WindowState.set(w, 'targetSmartResizeSize', { width: sim.width, height: sim.height });
                 WindowState.set(w, 'isConstrainedByMosaic', true);
 
-                w.move_resize_frame(false, frame.x, frame.y, sim.width, sim.height);
+                this._animateResize(w, frame, sim.width, sim.height);
                 Logger.log(`[SMART RESIZE] Rebal ${sim.id}: → ${sim.width}×${sim.height}`);
             }
 

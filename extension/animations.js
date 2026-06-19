@@ -7,6 +7,7 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import * as constants from './constants.js';
 import * as WindowState from './windowState.js';
+import { MINIATURE_ANIM_KIND } from './windowState.js';
 import { getAnimationsEnabled, getSlowDownFactor } from './timing.js';
 
 import GObject from 'gi://GObject';
@@ -52,7 +53,16 @@ export const AnimationsManager = GObject.registerClass({
     // a future leak site like that self-heals instead of needing to be hunted down.
     _pruneStaleAnimations() {
         for (const [id, actor] of this._animatingWindows) {
-            if (!actor || actor.is_destroyed() || !actor.get_transition('translation_x')) {
+            let stale;
+            try {
+                stale = !actor || actor.is_destroyed() || !actor.get_transition('translation_x');
+            } catch (e) {
+                // Actor's underlying GObject was fully disposed (e.g. window destroyed
+                // mid-animation) rather than merely Clutter-destroyed - any method call
+                // on it throws instead of returning a clean false/null.
+                stale = true;
+            }
+            if (stale) {
                 this._animatingWindows.delete(id);
                 this._animatingTargets.delete(id);
             }
@@ -155,10 +165,17 @@ export const AnimationsManager = GObject.registerClass({
             return;
         }
 
-        // Must read translation BEFORE remove_all_transitions() - it resets to 0 after.
+        // Must read translation/scale BEFORE remove_all_transitions() - they reset after.
         const currentFrame = window.get_frame_rect();
         const currentTx = windowActor.translation_x;
         const currentTy = windowActor.translation_y;
+        const currentScaleX = windowActor.scale_x;
+        const currentScaleY = windowActor.scale_y;
+
+        // A miniature restore animates scale on this same actor and owns recovery
+        // if we cut it off below (see continueScaleUp in miniature.js) - piling our
+        // own scale ease on top would fight it for the same property.
+        const skipScale = WindowState.get(window, MINIATURE_ANIM_KIND) != null;
 
         // remove_all_transitions fires old onStopped(isFinished=false);
         // the guard at the ease callback returns early without double cleanup.
@@ -183,9 +200,34 @@ export const AnimationsManager = GObject.registerClass({
         const initialTx = currentFrame.x + currentTx - targetRect.x;
         const initialTy = currentFrame.y + currentTy - targetRect.y;
 
+        // Same "no jump" logic, applied to visual size: preserves the actor's
+        // current on-screen size if a previous resize ease is still in flight.
+        const initialScaleX = targetRect.width > 0 ? (currentFrame.width * currentScaleX) / targetRect.width : 1;
+        const initialScaleY = targetRect.height > 0 ? (currentFrame.height * currentScaleY) / targetRect.height : 1;
+
         WindowState.set(window, 'isMosaicResizing', true);
         window.move_resize_frame(userOp, targetRect.x, targetRect.y, targetRect.width, targetRect.height);
         windowActor.set_translation(initialTx, initialTy, 0);
+        if (!skipScale) {
+            windowActor.set_pivot_point(0, 0);
+            windowActor.set_scale(initialScaleX, initialScaleY);
+        }
+
+        // Position keeps its own bounce; scale runs as a separate ease so it can use
+        // a different curve - an overshooting resize reads as a glitch, not a bounce.
+        if (!skipScale) {
+            windowActor.ease({
+                scale_x: 1,
+                scale_y: 1,
+                duration: effectiveDuration,
+                mode: ANIMATION_MODE_SUBTLE,
+                onStopped: (isFinished) => {
+                    if (!isFinished) return;
+                    if (windowActor && !windowActor.is_destroyed())
+                        windowActor.set_scale(1, 1);
+                }
+            });
+        }
 
         windowActor.ease({
             translation_x: 0,
@@ -206,10 +248,9 @@ export const AnimationsManager = GObject.registerClass({
     }
 
     animateReTiling(windowLayouts, draggedWindow = null) {
-        if (windowLayouts.length === 1) {
-            const { window, rect } = windowLayouts[0];
+        for (const { window, rect } of windowLayouts) {
             const currentRect = window.get_frame_rect();
-            
+
             const needsMove = Math.abs(currentRect.x - rect.x) > constants.ANIMATION_DIFF_THRESHOLD ||
                              Math.abs(currentRect.y - rect.y) > constants.ANIMATION_DIFF_THRESHOLD ||
                              Math.abs(currentRect.width - rect.width) > constants.ANIMATION_DIFF_THRESHOLD ||
@@ -217,11 +258,9 @@ export const AnimationsManager = GObject.registerClass({
 
             if (!needsMove) {
                 window.move_resize_frame(false, rect.x, rect.y, rect.width, rect.height);
-                return;
+                continue;
             }
-        }
 
-        for (const {window, rect} of windowLayouts) {
             this.animateWindow(window, rect, { draggedWindow });
         }
     }
