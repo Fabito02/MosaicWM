@@ -282,10 +282,13 @@ export const DragHandler = GObject.registerClass({
         
         if (!this.windowingManager.isExcluded(window)) {
             const skipTiling = this._skipNextTiling === window.get_id();
-            
-            this.reorderingManager.stopDrag(window, false, skipTiling);
-            
             const isResizeEnd = isResizeGrabOp(grabpo);
+
+            // Resize-end retiling is handled by resizeHandler.onResizeEnd below, which
+            // keeps resizingWindowId set through the final retile to avoid animation
+            // jiggle. Skip stopDrag's own retile here to avoid two overlapping tiling passes.
+            this.reorderingManager.stopDrag(window, false, skipTiling || isResizeEnd);
+
             if (isResizeEnd) {
                 this._ext.resizeHandler.onResizeEnd(window, grabpo, skipTiling);
             }
