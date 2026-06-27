@@ -548,7 +548,7 @@ export const WindowHandler = GObject.registerClass({
 
         if (this._pendingRestoreRetiles.length > 0) {
             for (const { workspace: ws, monitor: mon, windows } of this._pendingRestoreRetiles) {
-                Logger.log(`Retiling after restore delay (deferred: overview was open)`);
+                Logger.log('Retiling after restore delay (deferred: overview was open)');
                 this.animationsManager.setMembershipChangeBounce(true);
                 this._ext.tilingManager.tileWorkspaceWindows(ws, null, mon, true);
                 this.animationsManager.setMembershipChangeBounce(false);
