@@ -68,6 +68,7 @@ export const MINIATURE_TARGET_SIZE_PX = 256;  // Longest side of a miniaturized 
 export const MINIATURE_ANIM_MS = 250;
 export const MINIATURE_FOCUS_GUARD_MS = 500;  // Block focus-triggered restore right after miniaturizing
 export const NEW_WINDOW_MINIATURIZE_PROTECTION_MS = 2000;  // Shield a just-opened window from being chosen as the miniaturize target
+export const DND_MINIATURE_RESTORE_DELAY_MS = 400;  // Dwell time over a miniature before a DnD hover triggers restore
 
 // Compact the per-workspace swap history into a single canonical order op
 // once it grows past this many entries (keeps replay cost bounded)

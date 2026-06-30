@@ -124,7 +124,7 @@ const MiniatureEnforceEffect = GObject.registerClass({
         }
 
         if (WindowState.get(this._window, ANIMATING_MINIATURE)) {
-            // Animation controls transforms - don't interfere
+            // Animation controls transforms; don't interfere
             super.vfunc_paint(...args);
             return;
         }
@@ -275,7 +275,7 @@ export const MiniatureManager = GObject.registerClass({
         if (!windowActor) return false;
 
         // animateWindow's onStopped(false) leaves the window in AnimationsManager's tracking,
-        // expecting a new animateWindow call to clean up - but a miniature ease takes over
+        // expecting a new animateWindow call to clean up. A miniature ease takes over
         // instead, so nothing else would, and 'animations-completed' would never fire again.
         this._animationsManager?.removeAnimatingWindow(window.get_id());
 
@@ -290,14 +290,14 @@ export const MiniatureManager = GObject.registerClass({
         const currentFrame = window.get_frame_rect();
 
         // Buffer rect vs frame rect is a stable border offset; the actor's live position
-        // isn't - after back-to-back move_resize_frame calls (e.g. a restore cascade
+        // isn't. After back-to-back move_resize_frame calls (e.g. a restore cascade
         // re-miniaturizing siblings) the compositor lags, baking that stale gap into extLeft/extTop.
         const bufferRect = window.get_buffer_rect();
         const extLeft = currentFrame.x - bufferRect.x;
         const extTop = currentFrame.y - bufferRect.y;
         Logger.log(`[MINIATURE] createMiniature ${window.get_id()} (${window.get_wm_class?.() ?? '?'}): preFrame=(${preSize.x},${preSize.y} ${preSize.width}x${preSize.height}) slot=${Math.round(preSize.width * scale)}x${Math.round(preSize.height * scale)} currentFrame=(${currentFrame.x},${currentFrame.y} ${currentFrame.width}x${currentFrame.height}) actorBefore=(${actorBefore_x},${actorBefore_y}) target=(${targetX},${targetY}) scale=${scale.toFixed(4)} extLeft=${extLeft} extTop=${extTop}`);
 
-        // Store state BEFORE animation - enforce effect and workspace animation
+        // Store state BEFORE animation. Enforce effect and workspace animation
         // patch need to read these during the animation
         WindowState.set(window, IS_MINIATURE, true);
         WindowState.set(window, MINIATURE_SCALE, scale);
@@ -518,7 +518,7 @@ export const MiniatureManager = GObject.registerClass({
 
             // A retile can interrupt this mid-flight (it shares the actor with
             // animateWindow's own position ease). Rather than snap to full size,
-            // pick the scale-up back up from wherever it got cut off - position is
+            // pick the scale-up back up from wherever it got cut off; position is
             // already handed off to whatever interrupted us by this point.
             const continueScaleUp = (isFinished) => {
                 if (!windowActor || windowActor.is_destroyed()) return;
@@ -687,6 +687,27 @@ export const MiniatureManager = GObject.registerClass({
 
     getMiniatureSize(window) {
         return getMiniatureSize(window);
+    }
+
+    findMiniatureAtPoint(x, y) {
+        if (this._miniatureWindows.size === 0) return null;
+        const windows = global.display.get_tab_list(Meta.TabList.NORMAL, null);
+        for (const window of windows) {
+            if (!this._miniatureWindows.has(window.get_id())) continue;
+            const tgt = WindowState.get(window, MINIATURE_TARGET_POS);
+            const scale = WindowState.get(window, MINIATURE_SCALE);
+            const preSize = WindowState.get(window, PRE_MINIATURE_SIZE);
+            const extL = WindowState.get(window, MINIATURE_EXT_LEFT) ?? 0;
+            const extT = WindowState.get(window, MINIATURE_EXT_TOP) ?? 0;
+            if (!tgt || !scale || !preSize) continue;
+            const ox = tgt.x - extL * scale;
+            const oy = tgt.y - extT * scale;
+            const ow = preSize.width * scale;
+            const oh = preSize.height * scale;
+            if (x >= ox && x <= ox + ow && y >= oy && y <= oy + oh)
+                return window;
+        }
+        return null;
     }
 });
 
