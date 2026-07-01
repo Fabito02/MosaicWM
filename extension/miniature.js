@@ -565,6 +565,16 @@ export const MiniatureManager = GObject.registerClass({
             });
         }
 
+        // Snapshot the slot center before the fields below get cleared, so the
+        // layout scorer can pull the restored window back near where it sat.
+        const anchorPre = WindowState.get(window, PRE_MINIATURE_SIZE);
+        if (tgt && anchorPre) {
+            const cx = tgt.x + (anchorPre.width * sc) / 2;
+            const cy = tgt.y + (anchorPre.height * sc) / 2;
+            WindowState.set(window, 'restoreAnchorCenter', { cx, cy });
+            Logger.log(`[RESTORE ANCHOR] ${window.get_id()}: slot center (${cx.toFixed(0)},${cy.toFixed(0)})`);
+        }
+
         // Clear remaining WindowState
         WindowState.remove(window, MINIATURE_SCALE);
         WindowState.remove(window, PRE_MINIATURE_SIZE);
