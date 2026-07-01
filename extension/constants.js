@@ -40,6 +40,7 @@ export const REVERSE_RESIZE_PROTECTION_MS = 1000; // Protection window for rever
 export const RESIZE_SETTLE_DELAY_MS = 150;       // Delay to let Mutter apply resize before retiling
 export const RESIZE_CLAMP_SETTLE_WINDOW_MS = 1500; // Window age below which a clamp is treated as the client still settling
 export const RESIZE_CLAMP_RETRY_DELAY_MS = 200;  // Delay before retrying a clamped resize once
+export const SMART_RESIZE_CLAMP_MIN_SHRINK_PX = 8; // A window sized within this of its pre-resize size never really clamped, so don't remember it as a minimum
 export const ISRESIZING_FLAG_RESET_MS = 2;
 // Mutter can skip the size-changed confirmation on a fast maximize/unmaximize
 // toggle, so force the move after this long instead of leaving the window stuck.

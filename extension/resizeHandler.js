@@ -295,7 +295,7 @@ export const ResizeHandler = GObject.registerClass({
             if (pendingSmartSize) {
                 if (rect.width > pendingSmartSize.width + 2 || rect.height > pendingSmartSize.height + 2) {
                     if (this._shouldRetryClamp(window, pendingSmartSize)) {
-                        Logger.log(`[SMART RESIZE] Window ${window.get_id()} clamped while still settling: target=${pendingSmartSize.width}×${pendingSmartSize.height}, actual=${rect.width}×${rect.height} - retrying once`);
+                        Logger.log(`[SMART RESIZE] Window ${window.get_id()} clamped while still settling: target=${pendingSmartSize.width}×${pendingSmartSize.height}, actual=${rect.width}×${rect.height}; retrying once`);
                         WindowState.set(window, 'clampRetryTarget', { width: pendingSmartSize.width, height: pendingSmartSize.height });
                         const retryRect = window.get_frame_rect();
                         this._timeoutRegistry.add(constants.RESIZE_CLAMP_RETRY_DELAY_MS, () => {
@@ -303,7 +303,7 @@ export const ResizeHandler = GObject.registerClass({
                                 Logger.log(`[SMART RESIZE] Window ${window.get_id()} clamp retry firing: requesting ${pendingSmartSize.width}×${pendingSmartSize.height}`);
                                 window.move_resize_frame(false, retryRect.x, retryRect.y, pendingSmartSize.width, pendingSmartSize.height);
                             } else {
-                                Logger.log(`[SMART RESIZE] Window ${window.get_id()} clamp retry skipped - window gone`);
+                                Logger.log(`[SMART RESIZE] Window ${window.get_id()} clamp retry skipped; window gone`);
                             }
                             return GLib.SOURCE_REMOVE;
                         }, 'resizeHandler_clampRetry');
@@ -311,10 +311,34 @@ export const ResizeHandler = GObject.registerClass({
                         return;
                     }
 
-                    Logger.log(`[SMART RESIZE] Window ${window.get_id()} clamped: target=${pendingSmartSize.width}×${pendingSmartSize.height}, actual=${rect.width}×${rect.height}`);
+                    // Only a dimension that shrank below its opening size but stopped above
+                    // target really clamped; one still at its opening size just never applied
+                    // the resize, and freezing that as a minimum is the fake floor to avoid.
+                    const originalSize = WindowState.get(window, 'originalSize')
+                        || WindowState.get(window, 'preferredSize')
+                        || WindowState.get(window, 'openingSize');
+                    const shrank = constants.SMART_RESIZE_CLAMP_MIN_SHRINK_PX;
+                    const clampedW = !!originalSize
+                        && rect.width > pendingSmartSize.width + 2
+                        && rect.width < originalSize.width - shrank;
+                    const clampedH = !!originalSize
+                        && rect.height > pendingSmartSize.height + 2
+                        && rect.height < originalSize.height - shrank;
+
+                    if (!clampedW && !clampedH) {
+                        Logger.log(`[SMART RESIZE] Window ${window.get_id()} at pre-resize size ${rect.width}×${rect.height} (orig ${originalSize?.width}×${originalSize?.height}); not a real clamp, dropping target`);
+                        WindowState.set(window, 'targetSmartResizeSize', null);
+                        WindowState.remove(window, 'clampRetryTarget');
+                        this._sizeChanged = false;
+                        return;
+                    }
+
+                    Logger.log(`[SMART RESIZE] Window ${window.get_id()} clamped: target=${pendingSmartSize.width}×${pendingSmartSize.height}, actual=${rect.width}×${rect.height}, orig=${originalSize?.width}×${originalSize?.height}`);
                     WindowState.set(window, 'targetSmartResizeSize', { width: rect.width, height: rect.height });
-                    WindowState.set(window, 'actualMinWidth', rect.width);
-                    WindowState.set(window, 'actualMinHeight', rect.height);
+                    // Only the dimension that genuinely clamped is a real minimum; the other
+                    // might still be mid-flight.
+                    if (clampedW) WindowState.set(window, 'actualMinWidth', rect.width);
+                    if (clampedH) WindowState.set(window, 'actualMinHeight', rect.height);
                     WindowState.remove(window, 'clampRetryTarget');
 
                     // A window we just placed can clamp a few px against its own minimum.
@@ -324,7 +348,7 @@ export const ResizeHandler = GObject.registerClass({
                     if (!this._resizeGracePeriod || (now - this._resizeGracePeriod) >= constants.REVERSE_RESIZE_PROTECTION_MS) {
                         this._queueConstraintRebalance(window);
                     } else {
-                        Logger.log(`[SMART RESIZE] Window ${window.get_id()} clamp rebalance skipped - within grace period`);
+                        Logger.log(`[SMART RESIZE] Window ${window.get_id()} clamp rebalance skipped; within grace period`);
                     }
                 } else {
                     WindowState.set(window, 'targetSmartResizeSize', null);
