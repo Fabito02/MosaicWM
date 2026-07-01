@@ -70,6 +70,10 @@ export const MINIATURE_FOCUS_GUARD_MS = 500;  // Block focus-triggered restore r
 export const NEW_WINDOW_MINIATURIZE_PROTECTION_MS = 2000;  // Shield a just-opened window from being chosen as the miniaturize target
 export const DND_MINIATURE_RESTORE_DELAY_MS = 400;  // Dwell time over a miniature before a DnD hover triggers restore
 
+// Restored window's distance to its old slot is the primary layout pick; layouts
+// whose distances land within this many px tie, so shelves still break near-ties.
+export const RESTORE_PROXIMITY_TOLERANCE_PX = 100;
+
 // Compact the per-workspace swap history into a single canonical order op
 // once it grows past this many entries (keeps replay cost bounded)
 export const SWAP_OPS_COMPACT_THRESHOLD = 8;

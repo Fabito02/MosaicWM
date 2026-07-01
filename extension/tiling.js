@@ -736,6 +736,20 @@ export const TilingManager = GObject.registerClass({
         return score;
     }
 
+    // Distance from the restored window's center to the slot its miniature held (Infinity if absent).
+    _restoreDisplacement(tileResult) {
+        if (!this._restoreAnchor) return 0;
+        for (const level of tileResult.levels) {
+            for (const w of level.windows) {
+                if (w.id !== this._restoreAnchor.id) continue;
+                const px = (w.targetX ?? level.x) + w.width / 2;
+                const py = (w.targetY ?? level.y) + w.height / 2;
+                return Math.hypot(px - this._restoreAnchor.cx, py - this._restoreAnchor.cy);
+            }
+        }
+        return Infinity;
+    }
+
     // Find optimal ordering via permutations (with stability bonus for current order)
     _findOptimalOrder(windows, workArea, tilingFn) {
         if (windows.length <= 1) return windows;
@@ -746,6 +760,7 @@ export const TilingManager = GObject.registerClass({
 
         let bestOrder = windows;
         let bestScore = -Infinity;
+        let bestBucket = Infinity;
 
         for (const perm of permutations) {
             const result = tilingFn.call(this, perm, workArea, constants.WINDOW_SPACING);
@@ -758,14 +773,20 @@ export const TilingManager = GObject.registerClass({
                 if (isSameOrder) score += 5;
             }
 
-            if (score > bestScore) {
+            // A just-restored window makes proximity the primary pick, with the base score breaking ties inside the tolerance bucket.
+            const bucket = this._restoreAnchor
+                ? Math.round(this._restoreDisplacement(result) / constants.RESTORE_PROXIMITY_TOLERANCE_PX)
+                : 0;
+
+            if (bucket < bestBucket || (bucket === bestBucket && score > bestScore)) {
+                bestBucket = bucket;
                 bestScore = score;
                 bestOrder = perm;
             }
         }
 
         const elapsed = Date.now() - startTime;
-        Logger.log(`_findOptimalOrder: ${windows.length} windows, ${permutations.length} permutations, ${elapsed}ms`);
+        Logger.log(`_findOptimalOrder: ${windows.length} windows, ${permutations.length} permutations, ${elapsed}ms${this._restoreAnchor ? ` (restore anchor ${this._restoreAnchor.id})` : ''}`);
 
         return bestOrder;
     }
@@ -1798,10 +1819,22 @@ export const TilingManager = GObject.registerClass({
             this._positionSnapshot.set(w.get_id(), { cx: f.x + f.width / 2, cy: f.y + f.height / 2 });
         }
 
+        // Pull a just-restored window back toward its old miniature slot. The restore
+        // path tiles with a null reference, so find the flagged window among these.
+        this._restoreAnchor = null;
+        for (const w of meta_windows) {
+            const rc = WindowState.get(w, 'restoreAnchorCenter');
+            if (rc) {
+                this._restoreAnchor = { id: w.get_id(), cx: rc.cx, cy: rc.cy };
+                break;
+            }
+        }
+
         // Zero-displacement bias makes stability scoring revert explicit drag order; suppress once.
         if (this._skipStabilityForNextTile) {
             this._skipStabilityForNextTile = false;
             this._positionSnapshot = null;
+            this._restoreAnchor = null;
         }
 
         let tile_info = this._tile(windows, tileArea, dryRun);
@@ -1818,6 +1851,7 @@ export const TilingManager = GObject.registerClass({
         // DRY RUN: If dryRun flag is set, return overflow without moving anything
         if (dryRun) {
             this._positionSnapshot = null;
+            this._restoreAnchor = null;
             this._unlockWorkspaceEarlyReturn(workspace);
             return { overflow, layout: this._cachedTileResult?.windows || null };
         }
@@ -1854,6 +1888,7 @@ export const TilingManager = GObject.registerClass({
                         if (!resizeResult?.success) {
                             Logger.log('Smart resize could not fit sacred window');
                             this._positionSnapshot = null;
+                            this._restoreAnchor = null;
                             this._unlockWorkspaceEarlyReturn(workspace);
                             return { overflow: true, layout: null };
                         }
@@ -1944,6 +1979,7 @@ export const TilingManager = GObject.registerClass({
         }
 
         this._positionSnapshot = null;
+        this._restoreAnchor = null;
         if (tile_info?.levels?.length > 0) {
             this._lastTiledOrder = tile_info.levels.flatMap(l => l.windows).map(w => w.id);
             const newGroupAssignment = new Map();
@@ -1982,6 +2018,12 @@ export const TilingManager = GObject.registerClass({
 
         // Create miniatures for pending windows. Top-level only, not inside recursive tryFitWithResize.
         if (!isRecursive) {
+            // Consume any restore anchor so it can't bleed into a later retile.
+            for (const w of meta_windows) {
+                if (WindowState.get(w, 'restoreAnchorCenter'))
+                    WindowState.remove(w, 'restoreAnchorCenter');
+            }
+
             if (this._pendingMiniatureWindows?.length > 0 && this._extension?.miniatureManager) {
                 for (const { window: win, preSize } of this._pendingMiniatureWindows) {
                     // Skip if already miniaturized, since an earlier tile call may have created it first.
