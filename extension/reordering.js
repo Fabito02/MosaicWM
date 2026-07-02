@@ -191,9 +191,11 @@ export const ReorderingManager = GObject.registerClass({
         const workspace = meta_window.get_workspace();
         this.dragStart = false;
 
-        // Persist chosen layout order
+        // Persist chosen layout order and shape. Use the shape the layout was built from,
+        // not one re-derived from positions, since a row of unequal-height windows has
+        // differing top edges and would be misread as separate rows.
         if (!skip_apply && this._chosenLayout && this._tilingManager) {
-            this._tilingManager.applyOrderOp(workspace, this._chosenLayout.permOrder);
+            this._tilingManager.pinComposition(workspace, this._chosenLayout.shape, this._chosenLayout.permOrder);
         }
 
         this._dragLayouts = null;

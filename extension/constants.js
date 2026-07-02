@@ -4,6 +4,16 @@
 
 export const WINDOW_SPACING = 8; // Pixels
 
+// Cap on distinct drag candidates kept after de-duplication so the live nearest search
+// stays cheap. A safety net that keeps the current layout, so it never drops a reachable one.
+export const MAX_DRAG_LAYOUTS = 48;
+// Wall-clock ceiling for composition generation at drag start; a last-resort guard
+// against pathological window counts.
+export const DRAG_LAYOUT_TIME_BUDGET_MS = 8;
+// A Super+Arrow only counts as an action if it moves the focused window's center at
+// least this far in the pressed direction; below it the key is a no-op.
+export const KEYBOARD_RECOMPOSE_MIN_DISPLACEMENT_PX = 20;
+
 export const WINDOW_VALIDITY_CHECK_INTERVAL_MS = 10;
 
 export const TileZone = Object.freeze({

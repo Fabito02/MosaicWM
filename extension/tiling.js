@@ -3,6 +3,7 @@
 // Core mosaic tiling algorithm and layout management
 
 import Clutter from 'gi://Clutter'; // Used for Enums (AnimationMode, etc)
+import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 
@@ -27,6 +28,31 @@ const POSITION_STABILITY_WEIGHT = 40;
 // High enough to beat the other terms combined (they max out at 140), so
 // keeping a window's column/shelf wins unless that option would overflow.
 const GROUP_STABILITY_WEIGHT = 150;
+
+// Every ordered composition of n into 1..n groups (n=3 gives [3],[2,1],[1,2],[1,1,1]).
+// A lazy generator on purpose: the count is 2^(n-1), so callers iterate under a time
+// budget and stop early instead of materializing all of it for a huge window count.
+export function* generateRowCompositions(n) {
+    if (n <= 0) return;
+    if (n === 1) { yield [1]; return; }
+
+    function* build(remaining, groupsLeft, acc) {
+        if (remaining === 0) {
+            yield acc.slice();
+            return;
+        }
+        if (groupsLeft === 0) return;
+        // Reserve at least one window per remaining group so we never overshoot.
+        const maxFirst = groupsLeft === 1 ? remaining : remaining - (groupsLeft - 1);
+        for (let first = 1; first <= maxFirst; first++) {
+            acc.push(first);
+            yield* build(remaining - first, groupsLeft - 1, acc);
+            acc.pop();
+        }
+    }
+    for (let groups = 1; groups <= n; groups++)
+        yield* build(n, groups, []);
+}
 
 // Keyed by window ID internally to survive GI reference churn; API mirrors WeakMap
 const _computedLayouts = new Map();
@@ -67,6 +93,12 @@ export const TilingManager = GObject.registerClass({
         this._isSmartResizingBlocked = false;
         // Window ID being restored from miniature; shields it from the overflow handler
         this._restoringWindowId = null;
+
+        // Composition (windows-per-row shape) a deliberate drag/keyboard action pinned
+        // per workspace, so a non-default layout survives the next re-tile. WeakMap since
+        // it is keyed by workspace GObjects that come and go (like _workspaceSwaps).
+        this._pinnedComposition = new WeakMap();
+        this._activePinnedShape = null;
 
         // Layout cache to avoid redundant O(n!) permutation calculations
         this._lastLayoutHash = null;
@@ -348,6 +380,7 @@ export const TilingManager = GObject.registerClass({
     // Pre-compute all valid mosaic layouts for a drag session
     computeDragLayouts(windowDescriptors, workArea, draggedId) {
         const spacing = constants.WINDOW_SPACING;
+        const startTime = GLib.get_monotonic_time();
 
         let maxHeight = 0, maxWidth = 0;
         for (const w of windowDescriptors) {
@@ -358,33 +391,51 @@ export const TilingManager = GObject.registerClass({
         const tooWide = maxWidth > workArea.width * 0.9;
         const tooTall = maxHeight > workArea.height * 0.65;
         const useVertical = tooTall || isNarrow || tooWide;
-        const tilingFn = useVertical ? this._verticalShelves : this._horizontalShelves;
 
-        const perms = this._generatePermutations(windowDescriptors);
+        const n = windowDescriptors.length;
+        const dragged = windowDescriptors.find(w => w.id === draggedId);
+        if (!dragged) return [];
+        const others = windowDescriptors.filter(w => w.id !== draggedId);
+
         const layouts = [];
         const seenPositions = new Set();
+        let shapeCount = 0;
 
-        for (const perm of perms) {
-            const result = tilingFn.call(this, perm, workArea, spacing);
-            if (result.overflow) continue;
+        outer:
+        for (const shape of generateRowCompositions(n)) {
+            // Budget check per shape too, since the generator is lazy and stopping here
+            // caps generation (2^(n-1)) not just the inner loop.
+            if ((GLib.get_monotonic_time() - startTime) / 1000 > constants.DRAG_LAYOUT_TIME_BUDGET_MS)
+                break;
+            shapeCount++;
+            // Put the dragged window in each slot; keep the others in their stable order.
+            for (let slot = 0; slot < n; slot++) {
+                const ordered = [...others];
+                ordered.splice(slot, 0, dragged);
 
-            const positions = this._extractLayoutPositions(result, workArea);
-            const draggedPos = positions.find(p => p.id === draggedId);
-            if (!draggedPos) continue;
+                const result = this._placeByShape(ordered, workArea, spacing, shape, useVertical);
+                if (result.overflow) continue;
 
-            // De-duplicate by 50px grid snap
-            const snapKey = `${Math.round(draggedPos.x / 50)},${Math.round(draggedPos.y / 50)}`;
-            if (seenPositions.has(snapKey)) continue;
-            seenPositions.add(snapKey);
+                const positions = this._extractLayoutPositions(result, workArea);
+                const draggedPos = positions.find(p => p.id === draggedId);
+                if (!draggedPos) continue;
 
-            layouts.push({
-                draggedRect: draggedPos,
-                positions: positions,
-                permOrder: perm.map(w => w.id)
-            });
+                const snapKey = `${Math.round(draggedPos.x / 50)},${Math.round(draggedPos.y / 50)}`;
+                if (seenPositions.has(snapKey)) continue;
+                seenPositions.add(snapKey);
+
+                layouts.push({
+                    draggedRect: draggedPos,
+                    positions,
+                    permOrder: ordered.map(w => w.id),
+                    shape,
+                });
+
+                if (layouts.length >= constants.MAX_DRAG_LAYOUTS) break outer;
+            }
         }
 
-        Logger.log(`computeDragLayouts: ${perms.length} permutations → ${layouts.length} unique positions for window ${draggedId}`);
+        Logger.log(`computeDragLayouts: ${shapeCount} shapes, ${layouts.length} unique positions for window ${draggedId} in ${((GLib.get_monotonic_time() - startTime) / 1000).toFixed(1)}ms`);
         return layouts;
     }
 
@@ -552,6 +603,73 @@ export const TilingManager = GObject.registerClass({
         this._workspaceSwaps.set(workspace, filtered);
         // Pre-drag positions still in snapshot next call; stability heuristic would revert this order.
         this._skipStabilityForNextTile = true;
+    }
+
+    // Persist a chosen composition for the workspace. Ordering rides the existing order-op
+    // path; only the shape is new. Honored by _tile until the window count changes or the
+    // shape stops fitting.
+    pinComposition(workspace, shape, order) {
+        this._pinnedComposition.set(workspace, { count: order.length, shape });
+        Logger.log(`pinComposition: pinned shape [${shape.join(',')}] for ${order.length} windows`);
+        this.applyOrderOp(workspace, order);
+    }
+
+    // Pick the composition that moves the focused window's center farthest in `direction`.
+    // Returns { shape, order, displacement } or null if nothing beats the min threshold.
+    bestRecomposition(workspace, monitor, focusedWindow, direction) {
+        const startTime = GLib.get_monotonic_time();
+        let meta_windows = this._windowingManager.getMonitorWorkspaceWindows(workspace, monitor);
+
+        // Only mosaic windows take part; edge-tiled ones keep their fixed slots and would
+        // otherwise inflate n and make the real tile's window count mismatch the pin.
+        let workArea = workspace.get_work_area_for_monitor(monitor);
+        if (this._edgeTilingManager) {
+            const edgeTiled = this._edgeTilingManager.getEdgeTiledWindows(workspace, monitor);
+            if (edgeTiled.length > 0) {
+                const edgeIds = edgeTiled.map(s => s.window.get_id());
+                meta_windows = meta_windows.filter(w => !edgeIds.includes(w.get_id()));
+                // The mosaic lives in the space left over by the edge tiles, so fit there.
+                workArea = this._edgeTilingManager.calculateRemainingSpace(workspace, monitor);
+            }
+        }
+
+        const descriptors = this.windowsToDescriptors(meta_windows, monitor, focusedWindow);
+        const n = descriptors.length;
+        if (n < 2) return null;
+
+        const spacing = constants.WINDOW_SPACING;
+        const maxH = Math.max(...descriptors.map(w => w.height));
+        const maxW = Math.max(...descriptors.map(w => w.width));
+        const useVertical = maxH > workArea.height * 0.65 || workArea.width < workArea.height || maxW > workArea.width * 0.9;
+
+        const focused = descriptors.find(w => w.id === focusedWindow.get_id());
+        if (!focused) return null;
+        const others = descriptors.filter(w => w.id !== focusedWindow.get_id());
+        const f0 = focusedWindow.get_frame_rect();
+        const cur = { cx: f0.x + f0.width / 2, cy: f0.y + f0.height / 2 };
+        const sign = direction === 'right' || direction === 'down' ? 1 : -1;
+        const axis = direction === 'left' || direction === 'right' ? 'x' : 'y';
+
+        let best = null;
+        for (const shape of generateRowCompositions(n)) {
+            // Same budget as the drag path, since the generator is lazy and n can be large.
+            if ((GLib.get_monotonic_time() - startTime) / 1000 > constants.DRAG_LAYOUT_TIME_BUDGET_MS)
+                break;
+            for (let slot = 0; slot < n; slot++) {
+                const ordered = [...others];
+                ordered.splice(slot, 0, focused);
+                const result = this._placeByShape(ordered, workArea, spacing, shape, useVertical);
+                if (result.overflow) continue;
+                const positions = this._extractLayoutPositions(result, workArea);
+                const fp = positions.find(p => p.id === focusedWindow.get_id());
+                if (!fp) continue;
+                const center = axis === 'x' ? fp.x + fp.width / 2 : fp.y + fp.height / 2;
+                const disp = sign * (center - (axis === 'x' ? cur.cx : cur.cy));
+                if (disp >= constants.KEYBOARD_RECOMPOSE_MIN_DISPLACEMENT_PX && (!best || disp > best.displacement))
+                    best = { shape, order: ordered.map(w => w.id), displacement: disp };
+            }
+        }
+        return best;
     }
 
     _swapElements(array, id1, id2) {
@@ -804,8 +922,10 @@ export const TilingManager = GObject.registerClass({
         if (!windows || windows.length === 0) return { levels: [], vertical: false, overflow: false };
 
         const hash = this._getLayoutHash(windows, work_area);
-        // Skip cache during drag (order changes but hash doesn't)
-        if (this._cachedTileResult && this._lastLayoutHash === hash && !isSimulation && !this.isDragging) {
+        // Skip cache during drag (order changes but hash doesn't) and while a pin is
+        // active, since the hash ignores shape so a new pin would hit a stale cached
+        // layout and revert.
+        if (this._cachedTileResult && this._lastLayoutHash === hash && !isSimulation && !this.isDragging && !this._activePinnedShape) {
             Logger.log('_tile: Cache hit, reusing layout');
             return this._cachedTileResult;
         }
@@ -827,6 +947,20 @@ export const TilingManager = GObject.registerClass({
         
         // Select tiling function based on orientation
         const tilingFn = useVerticalShelves ? this._verticalShelves : this._horizontalShelves;
+
+        // A pinned composition wins over the auto-chosen grid, but only for the real
+        // apply (not simulations / drag) and only while it still fits. If it overflows,
+        // fall through to the normal path so overflow -> miniaturization still runs.
+        if (this._activePinnedShape && !isSimulation && !this.isDragging) {
+            const pinned = this._placeByShape(windows, work_area, spacing, this._activePinnedShape, useVerticalShelves);
+            if (!pinned.overflow) {
+                this._lastLayoutHash = hash;
+                this._cachedTileResult = pinned;
+                Logger.log(`_tile: ${windows.length} windows honoring pinned shape [${this._activePinnedShape.join(',')}]`);
+                return pinned;
+            }
+            Logger.log('_tile: pinned shape overflows, dropping to auto-layout');
+        }
 
         const currentResult = tilingFn.call(this, windows, work_area, spacing);
         let result;
@@ -1144,6 +1278,84 @@ export const TilingManager = GObject.registerClass({
             levels: levels,
             windows: windows
         };
+    }
+
+    // Force windows into an explicit shape instead of the auto-chosen grid (drag/keyboard/pin).
+    _placeByShape(windows, work_area, spacing, shape, vertical) {
+        const groups = [];
+        let idx = 0;
+        for (const count of shape) {
+            const g = [];
+            for (let i = 0; i < count && idx < windows.length; i++) g.push(windows[idx++]);
+            groups.push(g);
+        }
+
+        const levels = [];
+        let overflow = false;
+
+        if (!vertical) {
+            let totalHeight = 0;
+            for (let r = 0; r < groups.length; r++) {
+                const level = new Level(work_area);
+                for (const w of groups[r]) {
+                    level.windows.push(w);
+                    if (level.width > 0) level.width += spacing;
+                    level.width += w.width;
+                    level.height = Math.max(level.height, w.height);
+                }
+                if (level.width > work_area.width) overflow = true;
+                level.x = Math.max(work_area.x, (work_area.width - level.width) / 2 + work_area.x);
+                if (r > 0) totalHeight += spacing;
+                totalHeight += level.height;
+                levels.push(level);
+            }
+            if (totalHeight > work_area.height) overflow = true;
+
+            const y = Math.max(work_area.y, (work_area.height - totalHeight) / 2 + work_area.y);
+            let levelY = y;
+            for (const level of levels) {
+                level.y = levelY;
+                let xPos = level.x;
+                for (const w of level.windows) {
+                    w.targetX = xPos;
+                    w.targetY = levelY + (level.height - w.height) / 2;
+                    xPos += w.width + spacing;
+                }
+                levelY += level.height + spacing;
+            }
+            return { x: work_area.x, y, overflow, vertical: false, levels, windows };
+        }
+
+        let totalWidth = 0;
+        for (let c = 0; c < groups.length; c++) {
+            const level = new Level(work_area);
+            for (const w of groups[c]) {
+                level.windows.push(w);
+                if (level.height > 0) level.height += spacing;
+                level.height += w.height;
+                level.width = Math.max(level.width, w.width);
+            }
+            if (level.height > work_area.height) overflow = true;
+            if (c > 0) totalWidth += spacing;
+            totalWidth += level.width;
+            levels.push(level);
+        }
+        if (totalWidth > work_area.width) overflow = true;
+
+        const x = Math.max(work_area.x, (work_area.width - totalWidth) / 2 + work_area.x);
+        let levelX = x;
+        for (const level of levels) {
+            level.x = levelX;
+            const colHeight = level.windows.reduce((s, w, i) => s + w.height + (i > 0 ? spacing : 0), 0);
+            let yPos = Math.max(work_area.y, (work_area.height - colHeight) / 2 + work_area.y);
+            for (const w of level.windows) {
+                w.targetX = levelX + (level.width - w.width) / 2;
+                w.targetY = yPos;
+                yPos += w.height + spacing;
+            }
+            levelX += level.width + spacing;
+        }
+        return { x, y: work_area.y, overflow, vertical: true, levels, windows };
     }
 
     // Helper for 1-2 windows, simple centered row.
@@ -1837,7 +2049,18 @@ export const TilingManager = GObject.registerClass({
             this._restoreAnchor = null;
         }
 
+        // Honor a pinned composition only if it still matches the current window count.
+        // A count change (window opened/closed) invalidates it, handing control back to
+        // the default auto-layout.
+        this._activePinnedShape = null;
+        const pin = this._pinnedComposition.get(workspace);
+        if (pin) {
+            if (pin.count === windows.length) this._activePinnedShape = pin.shape;
+            else this._pinnedComposition.delete(workspace);
+        }
+
         let tile_info = this._tile(windows, tileArea, dryRun);
+        this._activePinnedShape = null;
         let overflow = tile_info.overflow;
         
         if (workspace_windows.length <= 1) {
@@ -3039,6 +3262,8 @@ export const TilingManager = GObject.registerClass({
         this._cachedTileResult = null;
         this._pendingMiniatureWindows = null;
         this._workspaceSwaps = null;
+        this._pinnedComposition = null;
+        this._activePinnedShape = null;
         this._edgeTilingManager = null;
         this._drawingManager = null;
         this._animationsManager = null;

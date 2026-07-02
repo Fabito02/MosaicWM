@@ -281,23 +281,43 @@ export const SwappingManager = GObject.registerClass({
         
         Logger.log(`Swapping window ${window.get_id()} in direction: ${direction}`);
 
-        // Hysteresis: Prevent rapid swapping
+        const windowState = this._edgeTilingManager.getWindowState(window);
+        const isWindowTiled = windowState && windowState.zone !== TileZone.NONE;
+
+        const neighbor = this.findNeighbor(window, direction, workspace, monitor);
+
+        // A snapped (edge-tiled) neighbor in this direction wins, so only recompose the
+        // mosaic when there isn't one. Recomposition is deterministic per press and moves
+        // retarget mid-flight, so it skips the anti-oscillation throttle below.
+        const snappedInDirection = neighbor && neighbor.type === 'tiling';
+        if (!isWindowTiled && this._tilingManager && !snappedInDirection) {
+            const best = this._tilingManager.bestRecomposition(workspace, monitor, window, direction);
+            if (best) {
+                this._tilingManager.pinComposition(workspace, best.shape, best.order);
+                this._tilingManager.invalidateLayoutCache();
+                this._tilingManager.tileWorkspaceWindows(workspace, null, monitor, false);
+                Logger.log(`Recomposed to [${best.shape.join(',')}] moving ${window.get_id()} ${direction}`);
+                return true;
+            }
+            // Recompose is the whole mosaic keyboard action; if nothing moves that way, do
+            // nothing rather than an order-swap that would leave the pinned shape stale.
+            Logger.log(`No recomposition for ${window.get_id()} ${direction}`);
+            return false;
+        }
+
+        // Hysteresis: prevent rapid oscillation of the neighbor swap below.
         const lastSwap = WindowState.get(window, 'lastSwapTime');
         const now = GLib.get_monotonic_time() / 1000;
         if (lastSwap && (now - lastSwap) < 500) {
             Logger.log(`Swap throttled for window ${window.get_id()}`);
             return false;
         }
-        
-        const neighbor = this.findNeighbor(window, direction, workspace, monitor);
+
         if (!neighbor) {
             Logger.log('No neighbor found in direction:', direction);
             return false;
         }
-        
-        const windowState = this._edgeTilingManager.getWindowState(window);
-        const isWindowTiled = windowState && windowState.zone !== TileZone.NONE;
-        
+
         switch (neighbor.type) {
             case 'mosaic':
                 if (isWindowTiled) {
