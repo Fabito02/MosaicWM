@@ -11,7 +11,7 @@ export class SettingsOverrider {
     constructor() {
         this.#overrides = new Map();
     }
-    
+
     add(settings, key, value) {
         const schemaId = settings.schema_id;
 
@@ -36,7 +36,7 @@ export class SettingsOverrider {
         settings.set_value(key, value);
         Logger.log(`Overriding ${schemaId}.${key}`);
     }
-    
+
     clear() {
         if (!this.#overrides) return;
 
@@ -63,7 +63,7 @@ export class SettingsOverrider {
 
         this.#overrides.clear();
     }
-    
+
     destroy() {
         this.clear();
         this.#overrides = null;

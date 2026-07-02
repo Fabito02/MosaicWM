@@ -645,7 +645,7 @@ export const WindowHandler = GObject.registerClass({
                     // Cascade target workspace if a previous window in this batch caused an overflow
                     Logger.log(`Evaluation queue: cascading window ${window.get_id()} to overflow destination WS-${lastOverflowWorkspace.index()}`);
                     workspace = lastOverflowWorkspace;
-                    
+
                     if (window.get_workspace() !== workspace) {
                         WindowState.set(window, 'movedByOverflow', true);
                         window.change_workspace(workspace);
@@ -671,7 +671,7 @@ export const WindowHandler = GObject.registerClass({
                 if (managedWindows.length === 0) {
                     // Only renavigate if the workspace is truly empty and not just being transitioned during overflow
                     const isEjectedByOverflow = lastOverflowWorkspace && lastOverflowWorkspace.index() !== workspace.index();
-                    
+
                     if (!isEjectedByOverflow) {
                         Logger.log(`Queue: Window ${window.get_id()} moved and left WS-${workspace.index()} empty - renavigating`);
                         this.windowingManager.renavigate(workspace, true, this._ext._lastVisitedWorkspace, monitor);

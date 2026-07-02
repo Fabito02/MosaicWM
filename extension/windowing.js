@@ -31,7 +31,7 @@ export const WindowingManager = GObject.registerClass({
         this._timeoutRegistry = null;
         this._overflowStartCallback = null;
         this._overflowEndCallback = null;
-        
+
         // Cache for getMonitorWorkspaceWindows - invalidated at start of each tiling operation
         // WeakMap<Workspace, Map<String, Window[]>>
         this._windowsCache = new WeakMap();
@@ -44,15 +44,15 @@ export const WindowingManager = GObject.registerClass({
     setAnimationsManager(manager) {
         this._animationsManager = manager;
     }
-    
+
     setTilingManager(manager) {
         this._tilingManager = manager;
     }
-    
+
     setTimeoutRegistry(registry) {
         this._timeoutRegistry = registry;
     }
-    
+
     setOverflowCallbacks(startCallback, endCallback) {
         this._overflowStartCallback = startCallback;
         this._overflowEndCallback = endCallback;
@@ -77,7 +77,7 @@ export const WindowingManager = GObject.registerClass({
 
     getMonitorWorkspaceWindows(workspace, monitor, allow_unrelated) {
         if (!workspace) return [];
-        
+
         let workspaceCache = this._windowsCache.get(workspace);
         if (!workspaceCache || workspaceCache._version !== this._cacheVersion) {
             workspaceCache = new Map();
@@ -89,7 +89,7 @@ export const WindowingManager = GObject.registerClass({
         if (workspaceCache.has(cacheKey)) {
             return workspaceCache.get(cacheKey);
         }
-        
+
         const _windows = [];
         const windows = workspace.list_windows();
         for (const window of windows)
@@ -106,18 +106,18 @@ export const WindowingManager = GObject.registerClass({
             Logger.error('tryTileWithSnappedWindow: edgeTilingManager not set');
             return false;
         }
-        
+
         const workspace = window.get_workspace();
         const monitor = window.get_monitor();
         const workArea = workspace.get_work_area_for_monitor(monitor);
-        
+
         const tileState = this._edgeTilingManager.getWindowState(edgeTiledWindow);
-        
+
         if (!tileState || tileState.zone === TileZone.NONE) {
             Logger.log('Existing window is not edge-tiled, cannot tile');
             return false;
         }
-        
+
         let direction;
         if (tileState.zone === TileZone.LEFT_FULL ||
             tileState.zone === TileZone.TOP_LEFT ||
@@ -131,15 +131,15 @@ export const WindowingManager = GObject.registerClass({
             Logger.log('Unsupported edge tile zone for dual-tiling');
             return false;
         }
-        
+
         const existingFrame = edgeTiledWindow.get_frame_rect();
         const existingWidth = existingFrame.width;
         const availableWidth = workArea.width - existingWidth;
-        
+
         Logger.log(`Auto-tiling: existing window width=${existingWidth}px, available=${availableWidth}px`);
-        
+
         let targetX, targetY, targetWidth, targetHeight;
-        
+
         if (direction === 'left') {
             targetX = workArea.x;
             targetY = workArea.y;
@@ -151,24 +151,24 @@ export const WindowingManager = GObject.registerClass({
             targetWidth = availableWidth;
             targetHeight = workArea.height;
         }
-        
+
         try {
             this._edgeTilingManager.saveWindowState(window);
-            
+
             window.unmaximize();
             window.move_resize_frame(false, targetX, targetY, targetWidth, targetHeight);
-            
+
             const zone = direction === 'left' ? TileZone.LEFT_FULL : TileZone.RIGHT_FULL;
             const state = this._edgeTilingManager.getWindowState(window);
             if (state) {
                 state.zone = zone;
                 Logger.log(`Dual-tiling: Updated window ${window.get_id()} state to zone ${zone}`);
-                
+
                 this._edgeTilingManager.setupResizeListener(window);
             }
-            
+
             this._edgeTilingManager.registerAutoTileDependency(window, edgeTiledWindow);
-            
+
             Logger.log(`Successfully dual-tiled window ${window.get_wm_class()} to ${direction} (${targetWidth}x${targetHeight})`);
             return true;
         } catch (error) {
@@ -187,7 +187,7 @@ export const WindowingManager = GObject.registerClass({
         const nextIndex = currentIndex + 1;
         const totalWorkspaces = workspaceManager.get_n_workspaces();
         const nextWorkspace = nextIndex < totalWorkspaces ? workspaceManager.get_workspace_by_index(nextIndex) : null;
-        
+
         let targetWorkspace;
         if (nextWorkspace && nextWorkspace.list_windows().length === 0) {
             Logger.log(`[WORKSPACE] Reusing existing empty workspace at WS-${nextIndex}`);
@@ -197,7 +197,7 @@ export const WindowingManager = GObject.registerClass({
             targetWorkspace = workspaceManager.append_new_workspace(false, this.getTimestamp());
             workspaceManager.reorder_workspace(targetWorkspace, nextIndex);
         }
-        
+
         return targetWorkspace;
     }
 
@@ -207,28 +207,28 @@ export const WindowingManager = GObject.registerClass({
         return new Promise(resolve => {
             const workspaceManager = global.workspace_manager;
             const monitor = window.get_monitor();
-            
+
             // Notify that overflow is starting
             if (this._overflowStartCallback) {
                 this._overflowStartCallback();
             }
-            
+
             // Flag window as overflow-moved to prevent tiling errors
             WindowState.set(window, 'movedByOverflow', true);
-        
+
             // Use current workspace as origin to prevent overflow target loops.
             const currentIndex = window.get_workspace().index();
-        
+
             Logger.log(`moveOversizedWindow: origin=${currentIndex}`);
-        
+
             const isSacred = this.isMaximizedOrFullscreen(window);
             const nextIndex = currentIndex + 1;
             const totalWorkspaces = workspaceManager.get_n_workspaces();
             let target_workspace = null;
-        
+
             // GNOME's dynamic workspaces might not have a workspace at nextIndex yet
             const nextWorkspace = nextIndex < totalWorkspaces ? workspaceManager.get_workspace_by_index(nextIndex) : null;
-        
+
             if (isSacred) {
                 Logger.log(`[PLACEMENT] Sacred window detected - targeting strictly WS-${nextIndex} for isolation`);
                 target_workspace = this.createOrReuseAdjacentWorkspace(workspaceManager.get_workspace_by_index(currentIndex));
@@ -242,7 +242,7 @@ export const WindowingManager = GObject.registerClass({
                     target_workspace = this.createOrReuseAdjacentWorkspace(workspaceManager.get_workspace_by_index(currentIndex));
                 }
             }
-        
+
             const previous_workspace = window.get_workspace();
             const switchFocusRequested = options.switchFocus !== false;
 
@@ -266,16 +266,16 @@ export const WindowingManager = GObject.registerClass({
                         this.showWorkspaceSwitcher(target_workspace, monitor);
                     }
                 }, this._timeoutRegistry);
-                
+
                 // Re-tile after window has settled
                 if (this._tilingManager) {
                     Logger.log('moveOversizedWindow: workspace switch done, retiling immediately and then waiting for animations');
-                    
+
                     // First, repair any aborted smart-resize corruption in the origin workspace before the window was ejected
                     if (previous_workspace.index() !== target_workspace.index()) {
                         this._tilingManager.tileWorkspaceWindows(previous_workspace, null, monitor);
                     }
-                    
+
                     // Tile target workspace IMMEDIATELY to prevent "leap to 0,0"
                     this._tilingManager.tileWorkspaceWindows(target_workspace, null, monitor);
 
@@ -283,7 +283,7 @@ export const WindowingManager = GObject.registerClass({
                         try {
                             // Perfectly tile the target workspace again after GNOME animations finish
                             this._tilingManager.tileWorkspaceWindows(target_workspace, null, monitor);
-                            
+
                             // Check position after tiling
                             this._timeoutRegistry.addIdle(() => {
                                 try {
@@ -295,7 +295,7 @@ export const WindowingManager = GObject.registerClass({
                                     const expectedX = Math.floor((workArea.width - finalFrame.width) / 2) + workArea.x;
                                     const expectedY = Math.floor((workArea.height - finalFrame.height) / 2) + workArea.y;
                                     const positionError = Math.abs(finalFrame.x - expectedX) + Math.abs(finalFrame.y - expectedY);
-                                    
+
                                     if (positionError > 10) {
                                         Logger.log(`moveOversizedWindow: window mispositioned by ${positionError}px, retiling`);
                                         this._tilingManager.tileWorkspaceWindows(target_workspace, null, monitor);
@@ -313,7 +313,7 @@ export const WindowingManager = GObject.registerClass({
                             }, 'windowing_positionCheck', GLib.PRIORITY_DEFAULT_IDLE);
                         } catch (e) {
                             Logger.error(`Error during moveOversizedWindow retiling: ${e}`);
-                            
+
                             WindowState.remove(window, 'movedByOverflow');
                             WindowState.remove(window, 'overflowOriginWorkspace');
 
@@ -332,7 +332,7 @@ export const WindowingManager = GObject.registerClass({
                     }
                     resolve(target_workspace);
                 }
-                
+
                 return GLib.SOURCE_REMOVE;
             });
         });
@@ -342,7 +342,7 @@ export const WindowingManager = GObject.registerClass({
         if (!this.isRelated(meta_window) || meta_window.minimized) {
             return true;
         }
-        
+
         // Always on top (window is above other windows)
         if (meta_window.is_above()) {
             return true;
@@ -382,11 +382,11 @@ export const WindowingManager = GObject.registerClass({
         if (meta_window.is_skip_taskbar()) {
             return false;
         }
-        
+
         if (meta_window.is_on_all_workspaces()) {
             return false;
         }
-        
+
         return true;
     }
 
@@ -439,12 +439,12 @@ export const WindowingManager = GObject.registerClass({
             }
             // 2. Try to move in the direction of the last visited workspace
             else if (lastVisitedIndex !== null && lastVisitedIndex !== currentIndex) {
-                const direction = lastVisitedIndex < currentIndex 
-                    ? Meta.MotionDirection.LEFT 
+                const direction = lastVisitedIndex < currentIndex
+                    ? Meta.MotionDirection.LEFT
                     : Meta.MotionDirection.RIGHT;
-                
+
                 target = workspace.get_neighbor(direction);
-                
+
                 // Guard: Don't jump to the final empty workspace if we were going right
                 if (target && target.index() === lastWorkspaceIndex) {
                     target = null;
@@ -456,11 +456,11 @@ export const WindowingManager = GObject.registerClass({
             // 3. Fallback: Systematic neighbor search (Left, then Right)
             if (!target || target.index() === currentIndex) {
                 target = workspace.get_neighbor(Meta.MotionDirection.LEFT);
-                
+
                 if (!target || target.index() === currentIndex || target.index() < 0) {
                     target = workspace.get_neighbor(Meta.MotionDirection.RIGHT);
                 }
-                
+
                 // Final safety: never fallback to the placeholder workspace
                 if (target && target.index() === lastWorkspaceIndex) {
                     target = null;
@@ -483,23 +483,23 @@ export const WindowingManager = GObject.registerClass({
 
     showWorkspaceSwitcher(workspace, monitorIndex = -1) {
         if (!workspace) return;
-        
+
         const index = workspace.index();
         Logger.log(`[SWITCHER] Activating OSD for WS-${index}`);
-        
+
         // Default to primary monitor if none specified
         if (monitorIndex === -1) {
             monitorIndex = Main.layoutManager.primaryIndex;
         }
-        
+
         Logger.log(`showWorkspaceSwitcher: showing WorkspaceSwitcherPopup for workspace ${index} on monitor ${monitorIndex}`);
-        
+
         // Use WorkspaceSwitcherPopup for native workspace switching indicator (dots/grid)
         try {
             if (!Main.wm._workspaceSwitcherPopup) {
                 Main.wm._workspaceSwitcherPopup = new WorkspaceSwitcherPopup.WorkspaceSwitcherPopup();
             }
-            
+
             // Ensure destruction cleanup
             if (!WindowState.get(Main.wm._workspaceSwitcherPopup, 'destroyConnected')) {
                 Main.wm._workspaceSwitcherPopup.connect('destroy', () => {

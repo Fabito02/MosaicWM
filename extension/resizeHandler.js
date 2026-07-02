@@ -20,7 +20,7 @@ export const ResizeHandler = GObject.registerClass({
     _init(extension) {
         super._init();
         this._ext = extension;
-        
+
         // Resize state
         this._sizeChanged = false;
         this._resizeOverflowWindow = null;
@@ -90,14 +90,14 @@ export const ResizeHandler = GObject.registerClass({
         this._resizeInOverflow = false;
         this._lastResizeTileTime = 0;
         this.animationsManager.setResizingWindow(window.get_id());
-        
+
         // Always clear smart-resize target so manual resize takes precedence
         WindowState.set(window, 'targetSmartResizeSize', null);
         if (WindowState.get(window, 'isSmartResizing')) {
             Logger.log(`Manual resize started for ${window.get_id()} - clearing smart-resize state`);
             WindowState.set(window, 'isSmartResizing', false);
         }
-        
+
         Logger.log(`Tracking resize for window ${window.get_id()}, grabpo=${grabpo}`);
     }
 
@@ -364,15 +364,15 @@ export const ResizeHandler = GObject.registerClass({
                 this._sizeChanged = false;
                 return;
             }
-            
+
             if (WindowState.get(window, 'actualMinWidth') && rect.width > WindowState.get(window, 'actualMinWidth') + 20) {
                 WindowState.remove(window, 'actualMinWidth');
                 WindowState.remove(window, 'actualMinHeight');
             }
-            
+
             const isConstrained = WindowState.get(window, 'isConstrainedByMosaic');
             const isManualResizeAction = this._currentGrabOp && isResizeGrabOp(this._currentGrabOp);
-            
+
             // If constrained but dimensions differ significantly from Smart Resize target,
             // assume an external or ambient resize and lift the constraint.
             let userForcedResize = isManualResizeAction;
@@ -387,7 +387,7 @@ export const ResizeHandler = GObject.registerClass({
                     }
                 }
             }
-            
+
             // Mirrors savePreferredSize's guard: a born-maximized window mid-unmaximize can
             // report its still-fullscreen frame here before tiling shrinks it, baking it in
             // as preferredSize and making the window read as workspace-filling forever.
@@ -432,10 +432,10 @@ export const ResizeHandler = GObject.registerClass({
                     }
                 }
             }
-            
+
             // Mode-Based Lock Cleanup
             WindowState.remove(window, 'isEnteringSacred');
-            
+
             if (this._skipNextTiling === window.get_id()) return;
 
             const tileState = this.edgeTilingManager.getWindowState(window);
@@ -445,21 +445,21 @@ export const ResizeHandler = GObject.registerClass({
             this._sizeChanged = true;
             const workspace = window.get_workspace();
             const monitor = window.get_monitor();
-            
+
             if (WindowState.get(window, 'movedByOverflow')) {
                 this._sizeChanged = false;
                 return;
             }
-            
+
             if (!this.windowingManager.isMaximizedOrFullscreen(window)) {
                 const isManualResize = this._currentGrabOp && isResizeGrabOp(this._currentGrabOp);
                 const windowId = window.get_id();
                 const resizeNow = GLib.get_monotonic_time() / 1000;
-                const isActiveResize = isManualResize || 
+                const isActiveResize = isManualResize ||
                     (this._lastResizeWindow === windowId && (resizeNow - this._lastResizeTime) < constants.RESIZE_SETTLE_DELAY_MS * 2);
                 this._lastResizeWindow = windowId;
                 this._lastResizeTime = resizeNow;
-                
+
                 if (isActiveResize) {
                     // Throttle: execute immediately, skip if too soon since last retile
                     if (this._lastResizeTileTime && (resizeNow - this._lastResizeTileTime) < 16) {
@@ -520,14 +520,14 @@ export const ResizeHandler = GObject.registerClass({
                     this._sizeChanged = false;
                     return;
                 }
-                
+
                 const canFit = this.tilingManager.canFitWindow(window, workspace, monitor);
                 const now = GLib.get_monotonic_time() / 1000;
                 if (this._resizeGracePeriod && (now - this._resizeGracePeriod) < constants.REVERSE_RESIZE_PROTECTION_MS) {
                     this._sizeChanged = false;
                     return;
                 }
-                
+
                 if (WindowState.get(window, 'isSmartResizing') || this.tilingManager._isSmartResizingBlocked) {
                     this._sizeChanged = false;
                     return;
@@ -556,7 +556,7 @@ export const ResizeHandler = GObject.registerClass({
                             this._sizeChanged = false;
                             return;
                         }
-                        
+
                         if (this._ext.windowHandler && this._ext.windowHandler.isWorkspaceLocked(workspace)) {
                             this._sizeChanged = false;
                             return;
@@ -576,18 +576,18 @@ export const ResizeHandler = GObject.registerClass({
                 } else if (canFit && this._resizeOverflowWindow === window) {
                     this._resizeOverflowWindow = null;
                 }
-                
+
                 // If it fits, perform tiling to ensure other windows move out of the way (live tiling)
                 // However, we throttle it slightly to avoid excessive calculations during smooth resizing
                 if (canFit) {
                     if (this._lastTileTime && (now - this._lastTileTime < 30)) {
                         this._sizeChanged = false;
-                        return; 
+                        return;
                     }
                     this._lastTileTime = now;
                 }
             }
-            
+
             this.tilingManager.tileWorkspaceWindows(workspace, null, monitor, true);
             this._sizeChanged = false;
         }
@@ -689,16 +689,16 @@ export const ResizeHandler = GObject.registerClass({
         const currentWorkspace = window.get_workspace();
         const workspaceManager = global.workspace_manager;
         const windowId = window.get_id();
-        
+
         if (preMaxSize) {
             WindowState.set(window, 'openingSize', preMaxSize);
         }
-        
+
         if (origIndex >= workspaceManager.get_n_workspaces()) {
             this.tilingManager.tileWorkspaceWindows(currentWorkspace, window, monitor);
             return;
         }
-        
+
         const targetWorkspace = workspaceManager.get_workspace_by_index(origIndex);
         if (currentWorkspace.index() === origIndex) {
             Logger.log(`handleUnmaximizeUndo: Window ${windowId} unmaximized on SAME workspace - tiling immediately`);
@@ -706,9 +706,9 @@ export const ResizeHandler = GObject.registerClass({
             if (preMaxSize) {
                 WindowState.set(window, 'targetRestoredSize', preMaxSize);
             }
-            
+
             this.tilingManager.tileWorkspaceWindows(currentWorkspace, window, monitor, true);
-            
+
             this._timeoutRegistry.add(constants.RESIZE_SETTLE_DELAY_MS + 100, () => {
                 WindowState.remove(window, 'unmaximizing');
                 WindowState.remove(window, 'targetRestoredSize');
@@ -716,11 +716,11 @@ export const ResizeHandler = GObject.registerClass({
             }, 'resizeHandler_settleUnmaximizeSame');
             return;
         }
-        
+
         if (preMaxSize) {
             WindowState.set(window, 'preferredSize', preMaxSize);
         }
-        
+
         // SMART FIT: Try to fit without resize first, then attempt to fit WITH resize
         const existingWindows = targetWorkspace.list_windows().filter(w => !this.windowingManager.isExcluded(w));
         let canFit = this.tilingManager.canFitWindow(window, targetWorkspace, monitor, true, preMaxSize);
@@ -740,17 +740,17 @@ export const ResizeHandler = GObject.registerClass({
                 this.tilingManager._pendingMiniatureWindows = pendingMiniatures;
             }
         }
-        
+
         if (!canFit) {
             Logger.log(`[SACRED-STAY] handleUnmaximizeUndo: Window ${windowId} unable to fit even with Smart Resize - staying in current workspace`);
             this.tilingManager.tileWorkspaceWindows(currentWorkspace, window, monitor);
             return;
         }
-        
+
         if (resizeNeeded) {
             Logger.log(`handleUnmaximizeUndo: Smart Resize applied successfully for return of ${windowId}`);
         }
-        
+
         window.unmaximize();
         WindowState.set(window, 'unmaximizing', true);
         WindowState.set(window, 'isConstrainedByMosaic', true);

@@ -411,7 +411,7 @@ export const EdgeTilingManager = GObject.registerClass({
             w.zone === TileZone.TOP_RIGHT || w.zone === TileZone.BOTTOM_RIGHT
         );
 
-        
+
         if (hasLeftFull || hasLeftQuarters) {
             // Find the rightmost edge of all left-tiled windows
             let maxRight = workArea.x;
@@ -453,7 +453,7 @@ export const EdgeTilingManager = GObject.registerClass({
 
     calculateRemainingSpaceForZone(zone, workArea) {
         const halfWidth = Math.floor(workArea.width / 2);
-        
+
         switch (zone) {
             case TileZone.LEFT_FULL:
             case TileZone.TOP_LEFT:
@@ -869,7 +869,7 @@ export const EdgeTilingManager = GObject.registerClass({
 
         const savedWidth = savedState.width;
         const savedHeight = savedState.height;
-        
+
         Logger.log(`removeTile: Checking dependencies for master=${winId}`);
         const dependents = WindowState.get(window, 'autoTileDependents');
         if (dependents && dependents.size > 0) {

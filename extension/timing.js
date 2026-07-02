@@ -20,7 +20,7 @@ export function getSlowDownFactor() {
 
 function getWorkspaceSwitchDuration() {
     if (!getAnimationsEnabled()) return 0;
-    
+
     // Adjust for slow down factor if present
     const baseDuration = FALLBACK_ANIMATION_MS;
     return Math.ceil(baseDuration * getSlowDownFactor());
@@ -100,7 +100,7 @@ export class TimeoutRegistry {
 
 export function createDebounced(func, delay, registry) {
     let timeoutId = null;
-    
+
     const debounced = function(...args) {
         if (timeoutId !== null) registry.remove(timeoutId);
         timeoutId = registry.add(delay, () => {
@@ -109,25 +109,25 @@ export function createDebounced(func, delay, registry) {
             return GLib.SOURCE_REMOVE;
         });
     };
-    
+
     debounced.cancel = () => {
         if (timeoutId !== null) {
             registry.remove(timeoutId);
             timeoutId = null;
         }
     };
-    
+
     return debounced;
 }
 
 export function afterWorkspaceSwitch(callback, registry) {
     const duration = getWorkspaceSwitchDuration();
-    
+
     if (duration === 0) {
         callback();
         return;
     }
-    
+
     // Wait for workspace animation duration
     registry.add(duration, () => {
         callback();
@@ -140,7 +140,7 @@ export function afterAnimations(animationsManager, callback, registry, maxWait =
         callback();
         return;
     }
-    
+
     let processed = false;
     let timeoutId = null;
     let signalId = null;
@@ -177,7 +177,7 @@ export function waitForGeometry(window, callback, registry, maxAttempts = consta
         callback(window);
         return;
     }
-    
+
     let signalId = null;
     let timeoutId = null;
     let processed = false;
@@ -216,7 +216,7 @@ export function afterWindowClose(callback, registry) {
         callback();
         return;
     }
-    
+
     const duration = FALLBACK_ANIMATION_MS * getSlowDownFactor();
     registry.add(duration + 50, () => {
         callback();
@@ -231,7 +231,7 @@ export function afterOverviewHidden(callback, registry) {
         callback();
         return;
     }
-    
+
     Logger.log('Waiting for overview to hide...');
 
     // 'done' guards against double execution: without it, the failsafe could

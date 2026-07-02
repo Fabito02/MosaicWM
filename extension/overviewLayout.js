@@ -19,7 +19,7 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
 
     computeWindowSlots(layout, area) {
         const clones = layout.windows;
-        
+
         if (!area || clones.length === 0) {
             return [];
         }
@@ -32,7 +32,7 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
             if (metaWindow.get_transient_for() !== null) return false;
             return true;
         });
-        
+
         if (filteredClones.length === 0)
             return [];
 
@@ -45,7 +45,7 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
                 if (workspace) break;
             }
         }
-        
+
         if (!workspace) return [];
 
         // --- VIEWPORT MIRROR ---
@@ -74,7 +74,7 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
             // Secondary Fallback: Real Window Frame (ensures visibility if cache is missing)
             const rect = ComputedLayouts.get(mw) || mw.get_frame_rect();
             if (!rect) continue;
-            
+
             // Formula: (DesktopPos - DesktopOrigin) * Scale + OverviewSlotOrigin + CenteringOffset
             // Half-gap inset on each side → full WINDOW_SPACING between adjacent thumbnails
             const gap = WINDOW_SPACING / 2;
@@ -82,7 +82,7 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
             const y = (rect.y - workArea.y) * scale + area.y + offsetY + gap;
             const w = rect.width * scale - gap * 2;
             const h = rect.height * scale - gap * 2;
-            
+
             slots.push([x, y, w, h, clone]);
         }
 
