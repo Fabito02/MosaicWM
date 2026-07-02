@@ -306,6 +306,16 @@ export default class WindowMosaicExtension extends Extension {
             this._settingsOverrider.add(mutterKeybindings, 'toggle-tiled-right', emptyArray);
         }
 
+        const shellKeybindings = new Gio.Settings({ schema_id: 'org.gnome.shell.keybindings' });
+        // Super+Alt+Up/Down is our swap-up/down default but also GNOME's stock
+        // shift-overview-up/down, so clear GNOME's to keep the combo for recomposition.
+        if (shellKeybindings.get_strv('shift-overview-up').includes('<Super><Alt>Up')) {
+            this._settingsOverrider.add(shellKeybindings, 'shift-overview-up', emptyArray);
+        }
+        if (shellKeybindings.get_strv('shift-overview-down').includes('<Super><Alt>Down')) {
+            this._settingsOverrider.add(shellKeybindings, 'shift-overview-down', emptyArray);
+        }
+
         // Override Overview layout to preserve mosaic positions
         this._injectionManager = new InjectionManager();
 
