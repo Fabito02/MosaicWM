@@ -19,6 +19,8 @@ export default [
  rules: {
  // Style — matching existing codebase patterns
  'indent': ['error', 4, { SwitchCase: 1 }],
+ 'no-tabs': 'error',
+ 'no-trailing-spaces': 'error',
  'quotes': ['error', 'single', { avoidEscape: true }],
  'semi': ['error', 'always'],
  'comma-dangle': ['error', 'only-multiline'],
