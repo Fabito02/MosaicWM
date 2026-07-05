@@ -713,14 +713,9 @@ export const WindowHandler = GObject.registerClass({
             return workspace;
         }
 
-        // Already constrained, so sibling frames may not have settled yet; tile directly to avoid false overflow.
-        if (WindowState.get(window, 'isConstrainedByMosaic')) {
-            Logger.log(`ensureWindowFits: Window ${window.get_id()} already constrained by mosaic - tiling directly`);
-            this.tilingManager.tileWorkspaceWindows(workspace, null, monitor, false);
-            return workspace;
-        }
-
-        // Path 1: Sacred Isolation (symmetric isolation enforcement).
+        // Path 1: Sacred Isolation (symmetric isolation enforcement). Runs before the
+        // constrained fast path, since tiling refuses sacred workspaces and would
+        // strand a constrained arrival floating there.
         const isIncomingSacred = this.windowingManager.isMaximizedOrFullscreen(window);
         const hasExistingSacred = this.windowingManager.hasSacredWindow(workspace, monitor, window.get_id());
         const workspaceWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor)
@@ -730,6 +725,13 @@ export const WindowHandler = GObject.registerClass({
         if (hasExistingSacred || (isIncomingSacred && otherWindows.length > 0)) {
             Logger.log(`Sacred Isolation triggered (IncomingSacred: ${isIncomingSacred}, HasExistingSacred: ${hasExistingSacred}) - isolating`);
             return await this.windowingManager.moveOversizedWindow(window);
+        }
+
+        // Already constrained, so sibling frames may not have settled yet; tile directly to avoid false overflow.
+        if (WindowState.get(window, 'isConstrainedByMosaic')) {
+            Logger.log(`ensureWindowFits: Window ${window.get_id()} already constrained by mosaic - tiling directly`);
+            this.tilingManager.tileWorkspaceWindows(workspace, null, monitor, false);
+            return workspace;
         }
 
         // Save preferred size after sacred checks, to avoid capturing monitor-sized dimensions
