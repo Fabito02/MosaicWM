@@ -76,7 +76,6 @@ export const QUEUE_PROCESS_DELAY_MS = 100;   // Delay between processing window 
 export const MINIATURE_TARGET_SIZE_PX = 256;  // Longest side of a miniaturized window
 export const MINIATURE_ANIM_MS = 250;
 export const MINIATURE_FOCUS_GUARD_MS = 500;  // Block focus-triggered restore right after miniaturizing
-export const NEW_WINDOW_MINIATURIZE_PROTECTION_MS = 2000;  // Shield a just-opened window from being chosen as the miniaturize target
 export const DND_MINIATURE_RESTORE_DELAY_MS = 400;  // Dwell time over a miniature before a DnD hover triggers restore
 
 // Restored window's distance to its old slot is the primary layout pick; layouts

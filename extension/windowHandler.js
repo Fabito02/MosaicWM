@@ -649,6 +649,7 @@ export const WindowHandler = GObject.registerClass({
                     workspace = currentWorkspace;
                 } else {
                     Logger.log(`Evaluation queue: window ${window.get_id()} has invalid workspace, skipping`);
+                    WindowState.remove(window, 'arrivalPending');
                     continue;
                 }
             }
@@ -709,6 +710,9 @@ export const WindowHandler = GObject.registerClass({
             } catch (e) {
                 Logger.error(`Error in evaluation queue for window ${window.get_id()}: ${e}`);
             }
+
+            // Placement resolved either way, so the arrival shield no longer applies
+            WindowState.remove(window, 'arrivalPending');
 
             // Small delay to let animations/mutter settle before evaluating the next window
             await new Promise(resolve => {
@@ -908,6 +912,7 @@ export const WindowHandler = GObject.registerClass({
             {
                 if(this.windowingManager.isExcluded(window)) {
                     Logger.log('Window excluded from tiling');
+                    WindowState.remove(window, 'arrivalPending');
                     return GLib.SOURCE_REMOVE;
                 }
 
@@ -955,6 +960,7 @@ export const WindowHandler = GObject.registerClass({
                         return GLib.SOURCE_REMOVE;
                     } else {
                         Logger.log('Sacred window in empty workspace - keeping here');
+                        WindowState.remove(window, 'arrivalPending');
                         this.tilingManager.tileWorkspaceWindows(workspace, window, monitor, false);
                         return GLib.SOURCE_REMOVE;
                     }
@@ -972,6 +978,7 @@ export const WindowHandler = GObject.registerClass({
 
                     if (tileSuccess) {
                         Logger.log('New window: Successfully tiled with edge-tiled window');
+                        WindowState.remove(window, 'arrivalPending');
                         this.connectWindowSignals(window);
                         return GLib.SOURCE_REMOVE;
                     }
@@ -1089,8 +1096,10 @@ export const WindowHandler = GObject.registerClass({
         // Capture natural size immediately upon arrival to a workspace
         this._ext.tilingManager.savePreferredSize(window);
 
-        // Mark window as newly added for overflow protection logic
+        // addedTime orders miniaturization candidates; arrivalPending shields the
+        // window until its arrival evaluation resolves placement.
         WindowState.set(window, 'addedTime', Date.now());
+        WindowState.set(window, 'arrivalPending', true);
 
         // Flag the first-ever tiling pass for this window so it slides in instead
         // of using the "no jump" continuity math meant for windows that already
@@ -1308,6 +1317,7 @@ export const WindowHandler = GObject.registerClass({
 
             if (this._ext.windowingManager.isExcluded(WINDOW)) {
                 Logger.log('waitForGeometry: Window is excluded - connecting signals but skipping tiling');
+                WindowState.remove(WINDOW, 'arrivalPending');
                 this.connectWindowSignals(WINDOW);
                 return GLib.SOURCE_REMOVE;
             }
@@ -1318,6 +1328,7 @@ export const WindowHandler = GObject.registerClass({
             if (WindowState.get(WINDOW, 'movedByOverflow')) {
                 Logger.log('Skipping early tile in waitForGeometry - window was moved by overflow (Flags cleared to prevent leakage)');
                 WindowState.remove(WINDOW, 'movedByOverflow');
+                WindowState.remove(WINDOW, 'arrivalPending');
                 return GLib.SOURCE_REMOVE;
             }
 
@@ -1345,6 +1356,7 @@ export const WindowHandler = GObject.registerClass({
             const performTiling = async () => {
                 if (WindowState.get(WINDOW, 'movedByOverflow')) {
                     Logger.log('Skipping duplicate evaluation queueing - window was already evaluated and moved by overflow');
+                    WindowState.remove(WINDOW, 'arrivalPending');
                     return;
                 }
                 this.enqueueWindowForEvaluation(WINDOW, WORKSPACE, MONITOR);

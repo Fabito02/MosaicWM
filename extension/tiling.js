@@ -150,12 +150,11 @@ export const TilingManager = GObject.registerClass({
     }
 
     // Whichever window happens to be "newWindow" for a given tryFitWithResize call
-    // isn't necessarily the most recently opened one - a sibling's miniature-restore
-    // runs its own pass with itself as newWindow. addedTime is the one signal that
-    // survives regardless of who's driving the current call.
-    _isRecentlyAdded(window) {
-        const addedTime = WindowState.get(window, 'addedTime');
-        return !!addedTime && (Date.now() - addedTime) < constants.NEW_WINDOW_MINIATURIZE_PROTECTION_MS;
+    // isn't necessarily the arriving one (a sibling's miniature-restore runs its
+    // own pass with itself as newWindow), so the shield lives on the window itself
+    // and drops the moment its arrival evaluation resolves placement.
+    _isArrivalPending(window) {
+        return WindowState.get(window, 'arrivalPending') === true;
     }
 
     setWindowingManager(manager) {
@@ -2085,14 +2084,15 @@ export const TilingManager = GObject.registerClass({
             edgeTiledWindows?.some(s => s.window.get_id() === reference_meta_window.get_id());
         const canOverflow = !hasEdgeTiledWindows || !referenceIsEdgeTiled;
 
+        let referenceOverflowSkipped = false;
         if(overflow && !keep_oversized_windows && reference_meta_window && canOverflow && !this.isDragging) {
-            // SAFETY: Only overflow windows that are genuinely new (added within last 2 seconds)
+            // SAFETY: Only overflow windows whose arrival is still being placed.
             // This prevents incorrectly expelling existing windows during resize retiling
-            const addedTime = WindowState.get(reference_meta_window, 'addedTime');
-            const isNewlyAdded = addedTime && (Date.now() - addedTime) < constants.NEW_WINDOW_MINIATURIZE_PROTECTION_MS;
+            const isNewlyAdded = this._isArrivalPending(reference_meta_window);
 
             if (!isNewlyAdded && !WindowState.get(reference_meta_window, 'forceOverflow') && !WindowState.get(reference_meta_window, 'isRestoringSacred')) {
                 Logger.log(`Skipping overflow for ${reference_meta_window.get_id()} - not a new window`);
+                referenceOverflowSkipped = true;
             } else if (WindowState.get(reference_meta_window, 'isSmartResizing') || WindowState.get(reference_meta_window, 'isRestoringSacred')) {
                 Logger.log(`Skipping overflow for ${reference_meta_window.get_id()} - smart resize/sacred restore in progress`);
 
@@ -2139,8 +2139,9 @@ export const TilingManager = GObject.registerClass({
             }
         }
 
-        // No reference window means nothing to eject, so try miniaturizing candidates to reclaim space.
-        if (overflow && !reference_meta_window && !this.isDragging && this._extension?.miniatureManager) {
+        // Nothing to eject (no reference, or its expulsion was skipped), so try
+        // miniaturizing candidates to reclaim space instead of painting overflow.
+        if (overflow && (!reference_meta_window || referenceOverflowSkipped) && !this.isDragging && this._extension?.miniatureManager) {
             const focusedId = global.display.focus_window?.get_id();
             const resizingId = this._animationsManager?.getResizingWindowId();
 
@@ -2150,6 +2151,7 @@ export const TilingManager = GObject.registerClass({
                     w.get_id() !== focusedId &&
                     w.get_id() !== resizingId &&
                     w.get_id() !== (this._restoringWindowId ?? null) &&
+                    w.get_id() !== (reference_meta_window?.get_id() ?? null) &&
                     !this._windowingManager.isMaximizedOrFullscreen(w)
                 )
                 .sort((a, b) => (WindowState.get(a, 'addedTime') ?? 0) - (WindowState.get(b, 'addedTime') ?? 0));
@@ -2927,7 +2929,7 @@ export const TilingManager = GObject.registerClass({
                     for (const w of orderedWindows0) {
                         const d = windowData.get(w.get_id());
                         if (!d || d.pendingMiniature) continue;
-                        if (w.get_id() === focusedId0 || w.get_id() === resizingWindowId || this._isRecentlyAdded(w)) continue;
+                        if (w.get_id() === focusedId0 || w.get_id() === resizingWindowId || this._isArrivalPending(w)) continue;
                         if (WindowState.get(w, IS_MINIATURE)) continue;
                         if (this._windowingManager.isMaximizedOrFullscreen(w)) continue;
                         if (!d.isResizable) continue;
@@ -2992,7 +2994,7 @@ export const TilingManager = GObject.registerClass({
                         const d = windowData.get(sim.id);
                         if (!d) return false;
                         if (d.pendingMiniature) return false;
-                        if (sim.id === focusedId || sim.id === resizingWindowId || this._isRecentlyAdded(d.window)) return false;
+                        if (sim.id === focusedId || sim.id === resizingWindowId || this._isArrivalPending(d.window)) return false;
                         if (WindowState.get(d.window, IS_MINIATURE)) return false;
                         if (this._windowingManager.isMaximizedOrFullscreen(d.window)) return false;
                         const { thresholdW, thresholdH } = getMiniatureThreshold(d.window);
