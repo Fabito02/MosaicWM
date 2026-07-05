@@ -31,6 +31,7 @@ export const WindowHandler = GObject.registerClass({
         this._overflowInProgress = false;
         this._windowSignals = new WeakMap(); // WeakMap so signal IDs are released when the window is GC'd
         this._pendingRestoreRetiles = [];
+        this._readinessWaiters = new Set();
     }
 
     destroy() {
@@ -39,6 +40,32 @@ export const WindowHandler = GObject.registerClass({
         this._evaluationQueue = [];
         this._isEvaluatingQueue = false;
         this._pendingRestoreRetiles = [];
+        for (const waiter of this._readinessWaiters) {
+            for (const id of waiter.ids) waiter.window.disconnect(id);
+        }
+        this._readinessWaiters.clear();
+    }
+
+    // Some windows aren't identifiable at map time (wm_class can arrive seconds
+    // late), so retry the gate whenever the relevant state changes.
+    _awaitWindowReadiness(window, tryProceed) {
+        const waiter = { window, ids: [] };
+        const finish = () => {
+            for (const id of waiter.ids) window.disconnect(id);
+            waiter.ids = [];
+            this._readinessWaiters.delete(waiter);
+        };
+        const retry = () => {
+            if (!isWindowAlive(window)) {
+                finish();
+                return;
+            }
+            if (tryProceed()) finish();
+        };
+        for (const signal of ['notify::wm-class', 'size-changed', 'notify::minimized'])
+            waiter.ids.push(window.connect(signal, retry));
+        waiter.ids.push(window.connect('unmanaged', finish));
+        this._readinessWaiters.add(waiter);
     }
 
     // Lock a workspace to prevent recursive or conflicting tiling triggers.
@@ -1015,13 +1042,8 @@ export const WindowHandler = GObject.registerClass({
                 if (timeoutId) this._timeoutRegistry.remove(timeoutId);
 
                 if (processWindowCallback() === GLib.SOURCE_CONTINUE) {
-                    // Bounded safety polling if initial callback failed (rare)
-                    let attempts = 0;
-                    this._timeoutRegistry.add(constants.WINDOW_VALIDITY_CHECK_INTERVAL_MS, () => {
-                        if (++attempts > constants.GEOMETRY_WAIT_MAX_ATTEMPTS || !isWindowAlive(window))
-                            return GLib.SOURCE_REMOVE;
-                        return processWindowCallback();
-                    }, 'windowHandler_safetyPoll');
+                    // Gate closed (e.g. wm_class still unset); retry on state changes
+                    this._awaitWindowReadiness(window, () => processWindowCallback() === GLib.SOURCE_REMOVE);
                 }
 
                 // Now that window is processed, connect standard signals
@@ -1051,21 +1073,10 @@ export const WindowHandler = GObject.registerClass({
                 return GLib.SOURCE_REMOVE;
             }, 'windowHandler_mapSafety');
         } else {
-            // Fallback for non-actor windows (rare in Shell): bounded polling
-            let fallbackAttempts = 0;
-            this._timeoutRegistry.add(constants.WINDOW_VALIDITY_CHECK_INTERVAL_MS, () => {
-                // Abort if window is gone (destroyed or unmanaged) or poll exhausted
-                if (++fallbackAttempts > constants.GEOMETRY_WAIT_MAX_ATTEMPTS ||
-                    !isWindowAlive(window) || !window.get_workspace()) {
-                    Logger.log('onWindowCreated fallback: window gone or poll exhausted - aborting');
-                    return GLib.SOURCE_REMOVE;
-                }
-                if (processWindowCallback() === GLib.SOURCE_REMOVE) {
-                    this.connectWindowSignals(window);
-                    return GLib.SOURCE_REMOVE;
-                }
-                return GLib.SOURCE_CONTINUE;
-            }, 'windowHandler_fallbackCreated');
+            // Fallback for non-actor windows (rare in Shell): same signal-driven gate
+            if (processWindowCallback() === GLib.SOURCE_CONTINUE)
+                this._awaitWindowReadiness(window, () => processWindowCallback() === GLib.SOURCE_REMOVE);
+            this.connectWindowSignals(window);
         }
     }
 
@@ -1127,70 +1138,69 @@ export const WindowHandler = GObject.registerClass({
             scheduleFirstPlacementFailsafe();
         }
 
-        let validityAttempts = 0;
-        this._timeoutRegistry.add(constants.WINDOW_VALIDITY_CHECK_INTERVAL_MS, () => {
-            // Abort if window is gone (destroyed or unmanaged) or poll exhausted
-            if (++validityAttempts > constants.GEOMETRY_WAIT_MAX_ATTEMPTS ||
-                !isWindowAlive(window) || !window.get_workspace()) {
-                Logger.log(`window-added: window ${window.get_id()} gone or poll exhausted - aborting`);
-                return GLib.SOURCE_REMOVE;
-            }
-
+        const proceedWhenValid = () => {
             const WORKSPACE = window.get_workspace();
+            if (!WORKSPACE) return false;
+
             const WINDOW = window;
             const MONITOR = WINDOW.get_monitor();
 
-            if (this._ext.tilingManager.checkValidity(MONITOR, WORKSPACE, WINDOW, false)) {
+            if (!this._ext.tilingManager.checkValidity(MONITOR, WORKSPACE, WINDOW, false))
+                return false;
 
-                const frame = WINDOW.get_frame_rect();
-                const hasValidDimensions = frame.width > 0 && frame.height > 0;
+            const frame = WINDOW.get_frame_rect();
+            if (frame.width <= 0 || frame.height <= 0)
+                return false;
 
-                if (hasValidDimensions) {
-                    // Detect a DnD across workspaces: window was just removed from a different
-                    // workspace within SAFETY_TIMEOUT_BUFFER_MS, so this add is the drop side.
-                    const previousWorkspaceIndex = WindowState.get(WINDOW, 'previousWorkspace');
-                    const removedTimestamp = WindowState.get(WINDOW, 'removedTimestamp');
-                    const timeSinceRemoved = removedTimestamp ? Date.now() - removedTimestamp : Infinity;
+            // Detect a DnD across workspaces: window was just removed from a different
+            // workspace within SAFETY_TIMEOUT_BUFFER_MS, so this add is the drop side.
+            const previousWorkspaceIndex = WindowState.get(WINDOW, 'previousWorkspace');
+            const removedTimestamp = WindowState.get(WINDOW, 'removedTimestamp');
+            const timeSinceRemoved = removedTimestamp ? Date.now() - removedTimestamp : Infinity;
 
-                    if (previousWorkspaceIndex !== undefined && previousWorkspaceIndex !== WORKSPACE.index() && timeSinceRemoved < constants.SAFETY_TIMEOUT_BUFFER_MS) {
-                        // Skip if this is an overflow move, not a real drag-drop
-                        if (!WindowState.get(WINDOW, 'movedByOverflow')) {
-                            // ACTIVATE destination workspace and EXIT Overview
-                            WORKSPACE.activate(global.get_current_time());
-                            this._ext.windowingManager.showWorkspaceSwitcher(WORKSPACE, MONITOR);
+            if (previousWorkspaceIndex !== undefined && previousWorkspaceIndex !== WORKSPACE.index() && timeSinceRemoved < constants.SAFETY_TIMEOUT_BUFFER_MS) {
+                // Skip if this is an overflow move, not a real drag-drop
+                if (!WindowState.get(WINDOW, 'movedByOverflow')) {
+                    // ACTIVATE destination workspace and EXIT Overview
+                    WORKSPACE.activate(global.get_current_time());
+                    this._ext.windowingManager.showWorkspaceSwitcher(WORKSPACE, MONITOR);
 
-                            // Mark as DnD arrival; triggers expansion after tiling
-                            WindowState.set(WINDOW, 'arrivedFromDnD', true);
+                    // Mark as DnD arrival; triggers expansion after tiling
+                    WindowState.set(WINDOW, 'arrivedFromDnD', true);
 
-                            // Wait for overview to fully close before tiling
-                            if (Main.overview.visible) {
-                                WindowState.set(WINDOW, 'deferTilingUntilOverviewHidden', true);
-                                Main.overview.hide();
-                            }
-
-                            // Clear DnD tracking; normal flow handles the window
-                            WindowState.remove(WINDOW, 'previousWorkspace');
-                            WindowState.remove(WINDOW, 'removedTimestamp');
-                            WindowState.remove(WINDOW, 'manualWorkspaceMove');
-                        }
+                    // Wait for overview to fully close before tiling
+                    if (Main.overview.visible) {
+                        WindowState.set(WINDOW, 'deferTilingUntilOverviewHidden', true);
+                        Main.overview.hide();
                     }
 
-                    // Mark window as waiting for geometry; prevents premature overflow
-                    WindowState.set(WINDOW, 'waitingForGeometry', true);
-
-                    // Repoll while waitForGeometry returns SOURCE_CONTINUE, bounded
-                    // so a window that never reports geometry can't poll forever.
-                    let geometryAttempts = 0;
-                    this._timeoutRegistry.add(constants.GEOMETRY_CHECK_DELAY_MS, () => {
-                        if (++geometryAttempts > constants.GEOMETRY_WAIT_MAX_ATTEMPTS || !isWindowAlive(WINDOW))
-                            return GLib.SOURCE_REMOVE;
-                        return this.waitForGeometry(WINDOW, WORKSPACE, MONITOR);
-                    }, 'windowHandler_geometryCheck');
-
-                    return GLib.SOURCE_REMOVE;
+                    // Clear DnD tracking; normal flow handles the window
+                    WindowState.remove(WINDOW, 'previousWorkspace');
+                    WindowState.remove(WINDOW, 'removedTimestamp');
+                    WindowState.remove(WINDOW, 'manualWorkspaceMove');
                 }
             }
-            return GLib.SOURCE_CONTINUE;
+
+            // Mark window as waiting for geometry; prevents premature overflow
+            WindowState.set(WINDOW, 'waitingForGeometry', true);
+
+            // Repoll while waitForGeometry returns SOURCE_CONTINUE, bounded
+            // so a window that never reports geometry can't poll forever.
+            let geometryAttempts = 0;
+            this._timeoutRegistry.add(constants.GEOMETRY_CHECK_DELAY_MS, () => {
+                if (++geometryAttempts > constants.GEOMETRY_WAIT_MAX_ATTEMPTS || !isWindowAlive(WINDOW))
+                    return GLib.SOURCE_REMOVE;
+                return this.waitForGeometry(WINDOW, WORKSPACE, MONITOR);
+            }, 'windowHandler_geometryCheck');
+
+            return true;
+        };
+
+        // First attempt runs on idle, keeping it out of the window-added emission
+        this._timeoutRegistry.addIdle(() => {
+            if (isWindowAlive(window) && !proceedWhenValid())
+                this._awaitWindowReadiness(window, proceedWhenValid);
+            return GLib.SOURCE_REMOVE;
         });
     }
 
