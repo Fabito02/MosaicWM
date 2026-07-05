@@ -306,6 +306,14 @@ export const MiniatureManager = GObject.registerClass({
         WindowState.set(window, MINIATURE_EXT_LEFT, extLeft);
         WindowState.set(window, MINIATURE_EXT_TOP, extTop);
 
+        // A swap can grab a window still fading in; finish the entrance fade
+        // here so the mini doesn't render half-transparent (or vanish) mid-fade.
+        if (WindowState.get(window, 'pendingFirstPlacement')) {
+            WindowState.remove(window, 'pendingFirstPlacement');
+            windowActor.remove_transition('opacity');
+            windowActor.opacity = 255;
+        }
+
         // Add the enforce effect (guard will skip during animation)
         const enforceEffect = new MiniatureEnforceEffect(window);
         windowActor.add_effect(enforceEffect);
