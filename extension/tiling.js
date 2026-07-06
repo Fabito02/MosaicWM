@@ -2335,7 +2335,6 @@ export const TilingManager = GObject.registerClass({
         let availableSpace = working_info.work_area;
         const newWindowId = window.get_id();
 
-
         if (edgeTiledWindows.length > 0) {
             const otherEdgeTiles = edgeTiledWindows.filter(w => w.window.get_id() !== window.get_id());
             const zones = otherEdgeTiles.map(w => w.zone);
@@ -2575,7 +2574,9 @@ export const TilingManager = GObject.registerClass({
     // geometrically fits. A looser gate here just restores it and watches Smart Resize
     // mini it right back (visible as a blink).
     canRestoreMiniature(candidateMini, remainingWindows, workArea) {
-        const isResizable = w => w.allows_resize && w.allows_resize();
+        // A shrink request can't win against the pointer, so simulate the grabbed window as fixed
+        const resizingWindowId = this._animationsManager?.getResizingWindowId();
+        const isResizable = w => w.get_id() !== resizingWindowId && w.allows_resize && w.allows_resize();
         const currentSizeOf = w => {
             if (w !== candidateMini && WindowState.get(w, IS_MINIATURE)) {
                 const ms = getMiniatureSize(w);
@@ -2610,6 +2611,13 @@ export const TilingManager = GObject.registerClass({
         const result = this._tile(preferredSim, workArea, true);
         Logger.log(`canRestoreMiniature: candidate=${candidateMini.get_id()}, sim=${preferredSim.map(s => `${s.id}:${s.width}x${s.height}`).join(', ')}, overflow=${result.overflow}`);
         if (!result.overflow) return true;
+
+        // Mid-grab a shrink-assisted fit flaps: the next drag event overflows it
+        // again and re-minis the window we just restored, so require a full-size fit
+        if (resizingWindowId !== null && remainingWindows.some(w => w.get_id() === resizingWindowId)) {
+            Logger.log(`canRestoreMiniature: resize grab active, keeping mini ${candidateMini.get_id()} until it fits at full size`);
+            return false;
+        }
 
         if (this._tile(buildSim(0.0), workArea, true).overflow) {
             Logger.log(`canRestoreMiniature: candidate=${candidateMini.get_id()} doesn't fit even at minimum sizes`);
@@ -2871,7 +2879,7 @@ export const TilingManager = GObject.registerClass({
                 const preferred = WindowState.get(w, 'preferredSize') || WindowState.get(w, 'openingSize');
                 const current = preferred || this.getEffectiveWindowSize(w);
                 const min = this.getWindowMinimumSize(w);
-                const isResizable = w.allows_resize && w.allows_resize();
+                const isResizable = w.get_id() !== resizingWindowId && w.allows_resize && w.allows_resize();
 
                 windowData.set(w.get_id(), { window: w, current, preferred, min, isResizable });
                 if (isResizable) allResizable.push(w);
@@ -3133,6 +3141,7 @@ export const TilingManager = GObject.registerClass({
 
         try {
             const workArea = this.getUsableWorkArea(workspace, monitor);
+            const resizingWindowId = this._animationsManager?.getResizingWindowId();
             const allWindows = this._windowingManager.getMonitorWorkspaceWindows(workspace, monitor)
                 .filter(w => !WindowState.get(w, 'pendingInQueue') &&
                              !this._edgeTilingManager?.isEdgeTiled(w) &&
@@ -3148,7 +3157,8 @@ export const TilingManager = GObject.registerClass({
                 const preferred = WindowState.get(w, 'preferredSize') || WindowState.get(w, 'originalSize');
                 const current = preferred || this.getEffectiveWindowSize(w);
                 const min = this.getWindowMinimumSize(w);
-                const isResizable = w.allows_resize?.();
+                // A shrink request can't win against the pointer, so the grabbed window is fixed
+                const isResizable = w.get_id() !== resizingWindowId && w.allows_resize?.();
 
                 windowData.set(w.get_id(), { window: w, current, min, isResizable });
                 if (isResizable) allResizable.push(w);
@@ -3195,6 +3205,13 @@ export const TilingManager = GObject.registerClass({
             // Overflow inevitable at corrected minimums
             if (this._tile(buildSimulated(0.0), workArea, true).overflow) {
                 Logger.log('[SMART RESIZE] Rebalance: overflow inevitable at corrected minimums');
+
+                // Ghost mode already flags this during a live grab; the release path decides
+                if (allWindows.some(w => w.get_id() === resizingWindowId)) {
+                    Logger.log('[SMART RESIZE] Rebalance: resize grab active, deferring overflow to release');
+                    return;
+                }
+
                 // Clear smart resize state and let normal overflow handle it
                 for (const w of allWindows) {
                     WindowState.set(w, 'targetSmartResizeSize', null);
