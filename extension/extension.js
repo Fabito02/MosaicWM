@@ -475,22 +475,25 @@ export default class WindowMosaicExtension extends Extension {
             };
         });
 
-        // Miniatures get snapped back to full size while the picker grabs window
-        // content, see pauseForScreenshot/resumeFromScreenshot in miniature.js.
+        // The picker's window captures at the top of open() need miniatures at
+        // full size, but the frozen stage shot right after must see them scaled
+        // again; resuming inside screenshot_stage_to_content splits the two.
         const screenshotProto = Screenshot.ScreenshotUI.prototype;
         this._injectionManager.overrideMethod(screenshotProto, 'open', originalMethod => {
             const extension = this;
             return function (...args) {
                 extension.miniatureManager?.pauseForScreenshot();
-                return originalMethod.apply(this, args);
-            };
-        });
-        this._injectionManager.overrideMethod(screenshotProto, 'close', originalMethod => {
-            const extension = this;
-            return function (...args) {
                 const result = originalMethod.apply(this, args);
+                // no-op normally; clears the pause when open() returned early
                 extension.miniatureManager?.resumeFromScreenshot();
                 return result;
+            };
+        });
+        this._injectionManager.overrideMethod(Shell.Screenshot.prototype, 'screenshot_stage_to_content', originalMethod => {
+            const extension = this;
+            return function (...args) {
+                extension.miniatureManager?.resumeFromScreenshot();
+                return originalMethod.apply(this, args);
             };
         });
 
