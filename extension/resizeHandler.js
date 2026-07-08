@@ -467,6 +467,13 @@ export const ResizeHandler = GObject.registerClass({
 
             if (this._skipNextTiling === window.get_id()) return;
 
+            // The ease owns the actor; retiling here would cut it mid-flight and
+            // leave the window at the wrong target. onStopped clears the flag.
+            if (WindowState.get(window, 'isMosaicResizing')) {
+                this._sizeChanged = false;
+                return;
+            }
+
             const tileState = this.edgeTilingManager.getWindowState(window);
             const isEdgeTiled = tileState && tileState.zone !== TileZone.NONE;
             if (isEdgeTiled) return;
