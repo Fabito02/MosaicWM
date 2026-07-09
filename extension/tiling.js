@@ -762,7 +762,7 @@ export const TilingManager = GObject.registerClass({
         return result;
     }
 
-    // Score a layout result - higher is better
+    // Score a layout result; higher is better
     // Prioritizes: no overflow, compactness, centralization
     _scoreLayout(tileResult, workArea) {
         if (!tileResult || tileResult.overflow) return -Infinity;
@@ -878,13 +878,15 @@ export const TilingManager = GObject.registerClass({
         let bestOrder = windows;
         let bestScore = -Infinity;
         let bestBucket = Infinity;
+        let bestFits = false;
 
         for (const perm of permutations) {
             const result = tilingFn.call(this, perm, workArea, constants.WINDOW_SPACING);
             let score = this._scoreLayout(result, workArea);
+            const fits = score > -Infinity;
 
             // Prefer current order (+5) to avoid unnecessary visual swaps
-            if (score > -Infinity) {
+            if (fits) {
                 const isSameOrder = perm.length === currentIds.length &&
                     perm.every((w, i) => w.id === currentIds[i]);
                 if (isSameOrder) score += 5;
@@ -895,7 +897,15 @@ export const TilingManager = GObject.registerClass({
                 ? Math.round(this._restoreDisplacement(result) / constants.RESTORE_PROXIMITY_TOLERANCE_PX)
                 : 0;
 
-            if (bucket < bestBucket || (bucket === bestBucket && score > bestScore)) {
+            // Proximity outranks the score, but never a layout that actually fits:
+            // an overflowing pick lands out of bounds and Mutter clamps it back on
+            // top of its neighbor. With nothing fitting, fall back to the old order.
+            const isBetter = fits !== bestFits
+                ? fits
+                : (bucket < bestBucket || (bucket === bestBucket && score > bestScore));
+
+            if (isBetter) {
+                bestFits = fits;
                 bestBucket = bucket;
                 bestScore = score;
                 bestOrder = perm;
@@ -988,7 +998,7 @@ export const TilingManager = GObject.registerClass({
         return result;
     }
 
-    // Vertical shelves layout - windows stack in columns side by side.
+    // Vertical shelves layout: windows stack in columns side by side.
     _verticalShelves(windows, work_area, spacing) {
         // For 1-2 windows, use simple centered column
         if (windows.length <= 2) {
