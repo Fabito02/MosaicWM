@@ -1025,7 +1025,7 @@ export const WindowHandler = GObject.registerClass({
             const isRelated = this.windowingManager.isRelated(window);
             const skipSlideIn = WindowState.get(window, 'movedByOverflow') || this._ext._overflowInProgress
                 || this.windowingManager.isMaximizedOrFullscreen(window)
-                || this.windowingManager.isExcluded(window)
+                || this.windowingManager.isExcludedByPolicy(window)
                 || !this._hasSiblings(window);
             if (isRelated && !skipSlideIn) {
                 // Ask Mutter to skip its own open animation outright (the same public
@@ -1134,7 +1134,7 @@ export const WindowHandler = GObject.registerClass({
         // for a window opening alone (see _hasSiblings): nothing to slide in next to.
         const skipSlideIn = WindowState.get(window, 'movedByOverflow') || this._ext._overflowInProgress
             || this.windowingManager.isMaximizedOrFullscreen(window)
-            || this.windowingManager.isExcluded(window)
+            || this.windowingManager.isExcludedByPolicy(window)
             || !this._hasSiblings(window);
         if (!skipSlideIn) {
             WindowState.set(window, 'pendingFirstPlacement', true);

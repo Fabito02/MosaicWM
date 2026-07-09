@@ -32,7 +32,7 @@ export const WindowingManager = GObject.registerClass({
         this._overflowStartCallback = null;
         this._overflowEndCallback = null;
 
-        // Cache for getMonitorWorkspaceWindows - invalidated at start of each tiling operation
+        // Cache for getMonitorWorkspaceWindows; invalidated at start of each tiling operation
         // WeakMap<Workspace, Map<String, Window[]>>
         this._windowsCache = new WeakMap();
     }
@@ -338,7 +338,10 @@ export const WindowingManager = GObject.registerClass({
         });
     }
 
-    isExcluded(meta_window) {
+    // The exclusion reasons that already hold before the window has any geometry.
+    // Callers running that early (entrance setup) must ask this instead of
+    // isExcluded, since an unmapped window reports 0x0 and reads as a 1×1 helper.
+    isExcludedByPolicy(meta_window) {
         if (!this.isRelated(meta_window) || meta_window.minimized) {
             return true;
         }
@@ -350,6 +353,14 @@ export const WindowingManager = GObject.registerClass({
 
         const wmClass = meta_window.get_wm_class();
         if (wmClass && BLACKLISTED_WM_CLASSES.includes(wmClass)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    isExcluded(meta_window) {
+        if (this.isExcludedByPolicy(meta_window)) {
             return true;
         }
 
