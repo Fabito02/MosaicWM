@@ -486,6 +486,14 @@ export const ResizeHandler = GObject.registerClass({
                 return;
             }
 
+            // A new window commits its first size before the arrival pipeline has
+            // placed it, and this global handler sees that ahead of the queue. Tiling
+            // on it just runs the same pass the arrival evaluation is about to run.
+            if (WindowState.get(window, 'arrivalPending')) {
+                this._sizeChanged = false;
+                return;
+            }
+
             const tileState = this.edgeTilingManager.getWindowState(window);
             const isEdgeTiled = tileState && tileState.zone !== TileZone.NONE;
             if (isEdgeTiled) return;
