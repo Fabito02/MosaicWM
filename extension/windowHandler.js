@@ -1227,8 +1227,12 @@ export const WindowHandler = GObject.registerClass({
             // so a window that never reports geometry can't poll forever.
             let geometryAttempts = 0;
             this._timeoutRegistry.add(constants.GEOMETRY_CHECK_DELAY_MS, () => {
-                if (++geometryAttempts > constants.GEOMETRY_WAIT_MAX_ATTEMPTS || !isWindowAlive(WINDOW))
+                if (++geometryAttempts > constants.GEOMETRY_WAIT_MAX_ATTEMPTS || !isWindowAlive(WINDOW)) {
+                    // Giving up here used to strand arrivalPending, and everything that
+                    // reads it as "placement unresolved" would shield the window forever.
+                    WindowState.remove(WINDOW, 'arrivalPending');
                     return GLib.SOURCE_REMOVE;
+                }
                 return this.waitForGeometry(WINDOW, WORKSPACE, MONITOR);
             }, 'windowHandler_geometryCheck');
 
