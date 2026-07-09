@@ -560,8 +560,11 @@ export const WindowHandler = GObject.registerClass({
 
             afterWindowClose(() => {
                 afterAnimations(this._ext.animationsManager, () => {
+                    // Both waits run inline when animations are off, so this can still
+                    // execute inside the destroy signal, with the dying window listed.
                     const remainingWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor)
-                        .filter(w => !this.edgeTilingManager.isEdgeTiled(w) && !this.windowingManager.isExcluded(w));
+                        .filter(w => w.get_id() !== windowId &&
+                                     !this.edgeTilingManager.isEdgeTiled(w) && !this.windowingManager.isExcluded(w));
 
                     this._retileAfterWindowGone(window, remainingWindows, workspace, monitor, freedWidth, freedHeight, {
                         requireConstrainedCheck: true,
