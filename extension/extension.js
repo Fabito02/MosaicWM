@@ -578,6 +578,7 @@ export default class WindowMosaicExtension extends Extension {
         this._wmEventIds.push(global.window_manager.connect('destroy', (_, win) => this.windowHandler.onWindowDestroyed(win.meta_window)));
         this._displayEventIds.push(global.display.connect('grab-op-begin', (display, window, grabpo) => this.dragHandler._grabOpBeginHandler(display, window, grabpo)));
         this._displayEventIds.push(global.display.connect('grab-op-end', (display, window, grabpo) => this.dragHandler._grabOpEndHandler(display, window, grabpo)));
+        this._displayEventIds.push(global.display.connect('restacked', () => this.miniatureManager?.syncOverlayStacking()));
         this._onOverviewShowingId = Main.overview.connect('showing', () => {
             this.animationsManager.setOverviewActive(true);
             this.miniatureManager?.setOverviewActive(true);

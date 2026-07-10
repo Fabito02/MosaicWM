@@ -719,6 +719,19 @@ export const MiniatureManager = GObject.registerClass({
         Logger.log(`[MINIATURE] Destroyed miniature ${window.get_id()} (window closed)`);
     }
 
+    // Mutter restacks window actors on its own and never touches our overlays, so a
+    // raised or dragged window would slide underneath a miniature's icon. Pin each
+    // overlay back onto its own actor whenever the stack moves.
+    syncOverlayStacking() {
+        for (const window of this._miniatureWindows.values()) {
+            const overlay = WindowState.get(window, MINIATURE_OVERLAY);
+            const actor = window.get_compositor_private();
+            const parent = actor?.get_parent();
+            if (overlay && parent && overlay.get_parent() === parent)
+                parent.set_child_above_sibling(overlay, actor);
+        }
+    }
+
     // Session icon steps aside so the WindowPreview's own icon can take over at
     // the exact same coordinates; no crossfade, no two icons on screen.
     setOverviewActive(active) {
