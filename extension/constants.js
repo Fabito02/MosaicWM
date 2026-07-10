@@ -78,6 +78,9 @@ export const QUEUE_PROCESS_DELAY_MS = 100;   // Delay between processing window 
 
 // Miniature windows
 export const MINIATURE_TARGET_SIZE_PX = 256;  // Longest side of a miniaturized window
+export const MINIATURE_ICON_SIZE_PX = 64;     // Same size the Overview uses, so the icon can hand off without resizing
+export const MINIATURE_ICON_FADE_IN_MS = 180;  // Miniature has already settled, so the icon can take its time
+export const MINIATURE_ICON_FADE_OUT_MS = 90;  // Window is growing back underneath, so the icon has to clear out fast
 export const MINIATURE_ANIM_MS = 250;
 export const MINIATURE_FOCUS_GUARD_MS = 500;  // Block focus-triggered restore right after miniaturizing
 export const DND_MINIATURE_RESTORE_DELAY_MS = 400;  // Dwell time over a miniature before a DnD hover triggers restore

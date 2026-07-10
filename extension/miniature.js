@@ -5,6 +5,7 @@ import GObject from 'gi://GObject';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import Meta from 'gi://Meta';
+import Shell from 'gi://Shell';
 
 import * as Logger from './logger.js';
 import * as constants from './constants.js';
@@ -154,9 +155,8 @@ const MiniatureEnforceEffect = GObject.registerClass({
 });
 
 /**
- * Transparent overlay that captures clicks on a miniature window.
- * Placed over the miniature's visual frame area. Clicking it restores
- * the miniature to full size.
+ * Overlay over a miniature's visual frame area. Captures clicks to restore the
+ * window, and carries the app icon that tells the miniature apart at a glance.
  */
 const MiniatureClickOverlay = GObject.registerClass({
     GTypeName: 'MosaicMiniatureClickOverlay',
@@ -164,19 +164,22 @@ const MiniatureClickOverlay = GObject.registerClass({
     _init(window, miniatureManager) {
         const preSize = WindowState.get(window, PRE_MINIATURE_SIZE);
         const scale = WindowState.get(window, MINIATURE_SCALE);
-        const extL = WindowState.get(window, MINIATURE_EXT_LEFT) ?? 0;
-        const extT = WindowState.get(window, MINIATURE_EXT_TOP) ?? 0;
 
         const width = preSize.width * scale;
         const height = preSize.height * scale;
 
+        // MINIATURE_TARGET_POS is where the frame lands, and preSize is the frame's
+        // size, so the box needs no shadow-extent shift. Offsetting it would put the
+        // centered icon off the Overview preview's own center, which tracks the frame.
         const tgt = WindowState.get(window, MINIATURE_TARGET_POS);
 
         super._init({
             reactive: true,
-            opacity: 0,
-            x: tgt.x - extL * scale,
-            y: tgt.y - extT * scale,
+            // The icon child would inherit a zero opacity, and this actor paints nothing anyway.
+            opacity: 255,
+            layout_manager: new Clutter.BinLayout(),
+            x: tgt.x,
+            y: tgt.y,
             width,
             height,
         });
@@ -184,12 +187,32 @@ const MiniatureClickOverlay = GObject.registerClass({
         this._window = window;
         this._miniatureManager = miniatureManager;
         this._destroyed = false;
+        this._iconSuppressReasons = new Set();
+
+        // Windows with no app associated (some dialogs, some XWayland clients)
+        // just get no icon; the overlay still works as a click target.
+        const app = Shell.WindowTracker.get_default().get_window_app(window);
+        this._icon = null;
+        if (app) {
+            this._icon = app.create_icon_texture(constants.MINIATURE_ICON_SIZE_PX);
+            // Same classes the Overview's WindowPreview uses, so both icons look identical.
+            this._icon.add_style_class_name('window-icon');
+            this._icon.add_style_class_name('icon-dropshadow');
+            this._icon.set({
+                // Non-reactive so picking falls through to the overlay underneath.
+                reactive: false,
+                opacity: 0,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            this.add_child(this._icon);
+        }
 
         // Mirror the window actor's visibility. Mutter sets the window actor
         // invisible when the user is on a different workspace; without this
-        // binding the overlay (reactive: true, opacity: 0) would keep being
-        // pickable on every workspace at the same screen position where the
-        // miniature lives on its own workspace, restoring it on stray clicks.
+        // binding the reactive overlay would keep being pickable on every
+        // workspace at the same screen position where the miniature lives on
+        // its own workspace, restoring it on stray clicks.
         const windowActor = window.get_compositor_private();
         if (windowActor) {
             windowActor.bind_property('visible',
@@ -212,12 +235,10 @@ const MiniatureClickOverlay = GObject.registerClass({
         if (this._destroyed) return;
         const tgt = WindowState.get(this._window, MINIATURE_TARGET_POS);
         const scale = WindowState.get(this._window, MINIATURE_SCALE);
-        const extL = WindowState.get(this._window, MINIATURE_EXT_LEFT) ?? 0;
-        const extT = WindowState.get(this._window, MINIATURE_EXT_TOP) ?? 0;
         const preSize = WindowState.get(this._window, PRE_MINIATURE_SIZE);
 
         if (tgt && scale && preSize) {
-            this.set_position(tgt.x - extL * scale, tgt.y - extT * scale);
+            this.set_position(tgt.x, tgt.y);
             this.set_size(preSize.width * scale, preSize.height * scale);
         }
     }
@@ -226,20 +247,66 @@ const MiniatureClickOverlay = GObject.registerClass({
         if (this._destroyed) return;
         const tgt = WindowState.get(this._window, MINIATURE_TARGET_POS);
         const scale = WindowState.get(this._window, MINIATURE_SCALE);
-        const extL = WindowState.get(this._window, MINIATURE_EXT_LEFT) ?? 0;
-        const extT = WindowState.get(this._window, MINIATURE_EXT_TOP) ?? 0;
         const preSize = WindowState.get(this._window, PRE_MINIATURE_SIZE);
 
         if (tgt && scale && preSize) {
             this.remove_all_transitions();
             this.ease({
-                x: tgt.x - extL * scale,
-                y: tgt.y - extT * scale,
+                x: tgt.x,
+                y: tgt.y,
                 duration,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             });
             this.set_size(preSize.width * scale, preSize.height * scale);
         }
+    }
+
+    showIcon(duration) {
+        if (this._destroyed || !this._icon) return;
+        if (this._iconSuppressReasons.size > 0) return;
+        this._icon.remove_all_transitions();
+        if (duration <= 0) {
+            this._icon.opacity = 255;
+            return;
+        }
+        this._icon.ease({
+            opacity: 255,
+            duration,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+    }
+
+    hideIcon() {
+        if (this._destroyed || !this._icon) return;
+        this._icon.remove_all_transitions();
+        this._icon.opacity = 0;
+    }
+
+    // Overview and the screenshot UI can both want the icon gone at once, so
+    // track who asked instead of a single flag.
+    setIconSuppressed(reason, suppressed) {
+        if (suppressed) this._iconSuppressReasons.add(reason);
+        else this._iconSuppressReasons.delete(reason);
+
+        if (this._iconSuppressReasons.size > 0) this.hideIcon();
+        else this.showIcon(0);
+    }
+
+    // Non-reactive while it fades, since the window growing back underneath owns the clicks now.
+    fadeOutAndDestroy(duration) {
+        if (this._destroyed) return;
+        this.reactive = false;
+        if (!this._icon || this._icon.opacity === 0 || duration <= 0) {
+            this.destroy();
+            return;
+        }
+        this._icon.remove_all_transitions();
+        this._icon.ease({
+            opacity: 0,
+            duration,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onStopped: () => this.destroy(),
+        });
     }
 
     destroy() {
@@ -260,6 +327,7 @@ export const MiniatureManager = GObject.registerClass({
         this._miniatureWindows = new Map();
         this._timeoutRegistry = null;
         this._animationsManager = null;
+        this._overviewActive = false;
     }
 
     setTimeoutRegistry(registry) {
@@ -368,6 +436,8 @@ export const MiniatureManager = GObject.registerClass({
                             if (finalTgt && finalSc) {
                                 applyMiniatureActorState(windowActor, finalSc, finalExtL, finalExtT, finalTgt.x, finalTgt.y);
                             }
+                            // The overlay is only built after this ease is kicked off, so read it back from state.
+                            WindowState.get(window, MINIATURE_OVERLAY)?.showIcon(Math.ceil(constants.MINIATURE_ICON_FADE_IN_MS * getSlowDownFactor()));
                             const [finalAx, finalAy] = windowActor.get_position();
                             const [finalW, finalH] = windowActor.get_size();
                             Logger.log(`[MINIATURE] createMiniature animation complete ${window.get_id()}: FINAL actor=(${finalAx},${finalAy} ${finalW}x${finalH}) scale=${finalSc} FINAL_VISUAL=${Math.round(finalW * finalSc)}x${Math.round(finalH * finalSc)}`);
@@ -410,6 +480,8 @@ export const MiniatureManager = GObject.registerClass({
                             if (finalTgt && finalSc) {
                                 applyMiniatureActorState(windowActor, finalSc, finalExtL, finalExtT, finalTgt.x, finalTgt.y);
                             }
+                            // The overlay is only built after this ease is kicked off, so read it back from state.
+                            WindowState.get(window, MINIATURE_OVERLAY)?.showIcon(Math.ceil(constants.MINIATURE_ICON_FADE_IN_MS * getSlowDownFactor()));
                             const [finalAx, finalAy] = windowActor.get_position();
                             const [finalW, finalH] = windowActor.get_size();
                             Logger.log(`[MINIATURE] createMiniature animation complete ${window.get_id()}: FINAL actor=(${finalAx},${finalAy} ${finalW}x${finalH}) scale=${finalSc} FINAL_VISUAL=${Math.round(finalW * finalSc)}x${Math.round(finalH * finalSc)}`);
@@ -444,6 +516,10 @@ export const MiniatureManager = GObject.registerClass({
         global.window_group.insert_child_above(overlay, windowActor);
         WindowState.set(window, MINIATURE_OVERLAY, overlay);
 
+        // No ease ran, so no onStopped will ever fire to fade the icon in.
+        if (!animate) overlay.showIcon(0);
+        if (this._overviewActive) overlay.setIconSuppressed('overview', true);
+
         Logger.log(`[MINIATURE] Created miniature for ${window.get_id()}, scale=${scale.toFixed(4)}`);
         return true;
     }
@@ -464,11 +540,12 @@ export const MiniatureManager = GObject.registerClass({
         // Remove IS_MINIATURE first so enforce effect stops
         WindowState.remove(window, IS_MINIATURE);
 
-        // Remove click overlay
+        // Drop it from state first: tiling.js's animateToPosition calls must stop
+        // finding it while the icon fades out on its own.
         const overlay = WindowState.get(window, MINIATURE_OVERLAY);
         if (overlay) {
-            overlay.destroy();
             WindowState.remove(window, MINIATURE_OVERLAY);
+            overlay.fadeOutAndDestroy(Math.ceil(constants.MINIATURE_ICON_FADE_OUT_MS * getSlowDownFactor()));
         }
 
         // Remove the enforce effect
@@ -642,6 +719,14 @@ export const MiniatureManager = GObject.registerClass({
         Logger.log(`[MINIATURE] Destroyed miniature ${window.get_id()} (window closed)`);
     }
 
+    // Session icon steps aside so the WindowPreview's own icon can take over at
+    // the exact same coordinates; no crossfade, no two icons on screen.
+    setOverviewActive(active) {
+        this._overviewActive = active;
+        for (const window of this._miniatureWindows.values())
+            WindowState.get(window, MINIATURE_OVERLAY)?.setIconSuppressed('overview', active);
+    }
+
     // Hard-restore every miniature back to full size. Used by disable() to
     // leave a clean slate, since the next enable() rebuilds via enforceWorkspaceFit.
     restoreAllMiniatures() {
@@ -670,6 +755,10 @@ export const MiniatureManager = GObject.registerClass({
             const actor = window.get_compositor_private();
             if (!actor) continue;
             WindowState.set(window, MINIATURE_SCREENSHOT_PAUSE, true);
+            // Actor goes back to full size here, but the overlay stays on the small
+            // rect. An icon left visible would land in the capture, floating over
+            // a full-size window.
+            WindowState.get(window, MINIATURE_OVERLAY)?.setIconSuppressed('screenshot', true);
             actor.set_pivot_point(0, 0);
             actor.set_scale(1, 1);
             actor.set_translation(0, 0, 0);
@@ -681,6 +770,7 @@ export const MiniatureManager = GObject.registerClass({
             .filter(w => WindowState.get(w, MINIATURE_SCREENSHOT_PAUSE));
         for (const window of windows) {
             WindowState.remove(window, MINIATURE_SCREENSHOT_PAUSE);
+            WindowState.get(window, MINIATURE_OVERLAY)?.setIconSuppressed('screenshot', false);
             if (!WindowState.get(window, IS_MINIATURE)) continue;
 
             const actor = window.get_compositor_private();
@@ -710,11 +800,9 @@ export const MiniatureManager = GObject.registerClass({
             const tgt = WindowState.get(window, MINIATURE_TARGET_POS);
             const scale = WindowState.get(window, MINIATURE_SCALE);
             const preSize = WindowState.get(window, PRE_MINIATURE_SIZE);
-            const extL = WindowState.get(window, MINIATURE_EXT_LEFT) ?? 0;
-            const extT = WindowState.get(window, MINIATURE_EXT_TOP) ?? 0;
             if (!tgt || !scale || !preSize) continue;
-            const ox = tgt.x - extL * scale;
-            const oy = tgt.y - extT * scale;
+            const ox = tgt.x;
+            const oy = tgt.y;
             const ow = preSize.width * scale;
             const oh = preSize.height * scale;
             if (x >= ox && x <= ox + ow && y >= oy && y <= oy + oh)
