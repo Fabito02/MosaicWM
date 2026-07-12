@@ -1610,130 +1610,131 @@ export const TilingManager = GObject.registerClass({
     }
 
     _animateTileLayout(workspace, tile_info, work_area, meta_windows, draggedWindow = null, slotsOut = null) {
-        if (this._animationsManager) {
-            const resizingWindowId = this._animationsManager.getResizingWindowId();
-            const pendingMiniIds = new Set(
-                (this._pendingMiniatureWindows ?? []).map(p => p.window.get_id())
-            );
+        // Nothing below can place a window without the manager, so let _drawTile do it.
+        if (!this._animationsManager) return false;
 
-            const levels = tile_info.levels;
-            const _y = tile_info.y;
+        const resizingWindowId = this._animationsManager.getResizingWindowId();
+        const pendingMiniIds = new Set(
+            (this._pendingMiniatureWindows ?? []).map(p => p.window.get_id())
+        );
 
-            const windowLayouts = [];
-            // Pending miniature windows are kept out of windowLayouts (createMiniature
-            // owns their visual animation), but a first placement sibling still needs
-            // to know they're there to compute a slide-in direction against. Tracked
-            // separately so animateReTiling can see them without animating them.
-            const miniLayouts = [];
+        const levels = tile_info.levels;
+        const _y = tile_info.y;
 
-            if (!tile_info.vertical) {
-                let y = _y;
-                for (const level of levels) {
-                    let x = level.x;
-                    for (const windowDesc of level.windows) {
-                        const center_offset = (work_area.height / 2 + work_area.y) - (y + windowDesc.height / 2);
-                        let y_offset = 0;
-                        if (center_offset > 0)
-                            y_offset = Math.min(center_offset, level.height - windowDesc.height);
+        const windowLayouts = [];
+        // Pending miniature windows are kept out of windowLayouts (createMiniature
+        // owns their visual animation), but a first placement sibling still needs
+        // to know they're there to compute a slide-in direction against. Tracked
+        // separately so animateReTiling can see them without animating them.
+        const miniLayouts = [];
 
-                        const window = meta_windows.find(w => w.get_id() === windowDesc.id);
-                        if (window) {
-                            if (WindowState.get(window, IS_MINIATURE)) {
-                                // Do NOT move_frame for miniatures (Mutter may reject)
-                                const actor = window.get_compositor_private();
-                                const sc = WindowState.get(window, MINIATURE_SCALE) ?? 1;
-                                const extL = WindowState.get(window, MINIATURE_EXT_LEFT) ?? 0;
-                                const extT = WindowState.get(window, MINIATURE_EXT_TOP) ?? 0;
-                                const tx = x;
-                                const ty = y + y_offset;
-                                if (actor && !actor.is_destroyed()) {
-                                    animateMiniatureToTarget(actor, window, sc, extL, extT, tx, ty,
-                                        constants.ANIMATION_DURATION_MS);
-                                    WindowState.get(window, MINIATURE_OVERLAY)?.animateToPosition(constants.ANIMATION_DURATION_MS);
-                                }
-                                // MosaicLayoutStrategy reads ComputedLayouts for the overview slot, so keep it in sync.
-                                const miniSlot = { x: tx, y: ty, width: windowDesc.width, height: windowDesc.height };
-                                ComputedLayouts.set(window, miniSlot);
-                                if (slotsOut) slotsOut.set(window.get_id(), miniSlot);
-                                Logger.log(`[MINIATURE] animateTile H ${window.get_id()}: target=(${tx},${ty}) scale=${sc.toFixed(4)} extLeft=${extL} extTop=${extT} size=${windowDesc.width}x${windowDesc.height}`);
-                            } else if (windowDesc.id === resizingWindowId) {
-                                window.move_frame(false, x, y + y_offset);
-                            } else if (pendingMiniIds.has(window.get_id())) {
-                                // Pending miniature: capture slot, but skip animateReTiling.
-                                // createMiniature handles all visual animation; concurrent
-                                // move_resize_frame would shift actor mid-animation.
-                                const slot = { x, y: y + y_offset, width: windowDesc.width, height: windowDesc.height };
-                                ComputedLayouts.set(window, slot);
-                                if (slotsOut) slotsOut.set(window.get_id(), slot);
-                                miniLayouts.push({ window, rect: slot });
-                                Logger.log(`[LAYOUT] H pending-mini ${window.get_id()}: slot=(${slot.x},${slot.y}) size=${slot.width}x${slot.height}`);
-                            } else {
-                                Logger.log(`[LAYOUT] H window ${window.get_id()}: target=(${x},${y + y_offset}) size=${windowDesc.width}x${windowDesc.height}`);
-                                const slot = { x, y: y + y_offset, width: windowDesc.width, height: windowDesc.height };
-                                ComputedLayouts.set(window, slot);
-                                if (slotsOut) slotsOut.set(window.get_id(), slot);
-                                windowLayouts.push({ window, rect: slot });
+        if (!tile_info.vertical) {
+            let y = _y;
+            for (const level of levels) {
+                let x = level.x;
+                for (const windowDesc of level.windows) {
+                    const center_offset = (work_area.height / 2 + work_area.y) - (y + windowDesc.height / 2);
+                    let y_offset = 0;
+                    if (center_offset > 0)
+                        y_offset = Math.min(center_offset, level.height - windowDesc.height);
+
+                    const window = meta_windows.find(w => w.get_id() === windowDesc.id);
+                    if (window) {
+                        if (WindowState.get(window, IS_MINIATURE)) {
+                            // Do NOT move_frame for miniatures (Mutter may reject)
+                            const actor = window.get_compositor_private();
+                            const sc = WindowState.get(window, MINIATURE_SCALE) ?? 1;
+                            const extL = WindowState.get(window, MINIATURE_EXT_LEFT) ?? 0;
+                            const extT = WindowState.get(window, MINIATURE_EXT_TOP) ?? 0;
+                            const tx = x;
+                            const ty = y + y_offset;
+                            if (actor && !actor.is_destroyed()) {
+                                animateMiniatureToTarget(actor, window, sc, extL, extT, tx, ty,
+                                    constants.ANIMATION_DURATION_MS);
+                                WindowState.get(window, MINIATURE_OVERLAY)?.animateToPosition(constants.ANIMATION_DURATION_MS);
                             }
+                            // MosaicLayoutStrategy reads ComputedLayouts for the overview slot, so keep it in sync.
+                            const miniSlot = { x: tx, y: ty, width: windowDesc.width, height: windowDesc.height };
+                            ComputedLayouts.set(window, miniSlot);
+                            if (slotsOut) slotsOut.set(window.get_id(), miniSlot);
+                            Logger.log(`[MINIATURE] animateTile H ${window.get_id()}: target=(${tx},${ty}) scale=${sc.toFixed(4)} extLeft=${extL} extTop=${extT} size=${windowDesc.width}x${windowDesc.height}`);
+                        } else if (windowDesc.id === resizingWindowId) {
+                            window.move_frame(false, x, y + y_offset);
+                        } else if (pendingMiniIds.has(window.get_id())) {
+                            // Pending miniature: capture slot, but skip animateReTiling.
+                            // createMiniature handles all visual animation; concurrent
+                            // move_resize_frame would shift actor mid-animation.
+                            const slot = { x, y: y + y_offset, width: windowDesc.width, height: windowDesc.height };
+                            ComputedLayouts.set(window, slot);
+                            if (slotsOut) slotsOut.set(window.get_id(), slot);
+                            miniLayouts.push({ window, rect: slot });
+                            Logger.log(`[LAYOUT] H pending-mini ${window.get_id()}: slot=(${slot.x},${slot.y}) size=${slot.width}x${slot.height}`);
+                        } else {
+                            Logger.log(`[LAYOUT] H window ${window.get_id()}: target=(${x},${y + y_offset}) size=${windowDesc.width}x${windowDesc.height}`);
+                            const slot = { x, y: y + y_offset, width: windowDesc.width, height: windowDesc.height };
+                            ComputedLayouts.set(window, slot);
+                            if (slotsOut) slotsOut.set(window.get_id(), slot);
+                            windowLayouts.push({ window, rect: slot });
                         }
-                        x += windowDesc.width + constants.WINDOW_SPACING;
                     }
-                    y += level.height + constants.WINDOW_SPACING;
+                    x += windowDesc.width + constants.WINDOW_SPACING;
                 }
-            } else {
-                // Vertical layout: each level is a column
-                let x = tile_info.x;
-                for (const level of levels) {
-                    let y = level.y;
-                    for (const windowDesc of level.windows) {
-                        // Use targetX/targetY if set, otherwise calculate
-                        const targetX = windowDesc.targetX !== undefined ? windowDesc.targetX : x;
-                        const targetY = windowDesc.targetY !== undefined ? windowDesc.targetY : y;
-
-                        const window = meta_windows.find(w => w.get_id() === windowDesc.id);
-                        if (window) {
-                            if (WindowState.get(window, IS_MINIATURE)) {
-                                // Do NOT move_frame for miniatures (Mutter may reject)
-                                const actor = window.get_compositor_private();
-                                const sc = WindowState.get(window, MINIATURE_SCALE) ?? 1;
-                                const extL = WindowState.get(window, MINIATURE_EXT_LEFT) ?? 0;
-                                const extT = WindowState.get(window, MINIATURE_EXT_TOP) ?? 0;
-                                if (actor && !actor.is_destroyed()) {
-                                    animateMiniatureToTarget(actor, window, sc, extL, extT, targetX, targetY,
-                                        constants.ANIMATION_DURATION_MS);
-                                    WindowState.get(window, MINIATURE_OVERLAY)?.animateToPosition(constants.ANIMATION_DURATION_MS);
-                                }
-                                // MosaicLayoutStrategy reads ComputedLayouts for the overview slot, so keep it in sync.
-                                const miniSlot = { x: targetX, y: targetY, width: windowDesc.width, height: windowDesc.height };
-                                ComputedLayouts.set(window, miniSlot);
-                                if (slotsOut) slotsOut.set(window.get_id(), miniSlot);
-                                Logger.log(`[MINIATURE] animateTile V ${window.get_id()}: target=(${targetX},${targetY}) scale=${sc.toFixed(4)} extLeft=${extL} extTop=${extT} slotSize=${windowDesc.width}x${windowDesc.height}`);
-                            } else if (windowDesc.id === resizingWindowId) {
-                                window.move_frame(false, targetX, targetY);
-                            } else if (pendingMiniIds.has(window.get_id())) {
-                                // Pending miniature: capture slot, but skip animateReTiling.
-                                // createMiniature handles all visual animation; concurrent
-                                // move_resize_frame would shift actor mid-animation.
-                                const slot = { x: targetX, y: targetY, width: windowDesc.width, height: windowDesc.height };
-                                ComputedLayouts.set(window, slot);
-                                if (slotsOut) slotsOut.set(window.get_id(), slot);
-                                miniLayouts.push({ window, rect: slot });
-                                Logger.log(`[LAYOUT] V pending-mini ${window.get_id()}: slot=(${slot.x},${slot.y}) size=${slot.width}x${slot.height}`);
-                            } else {
-                                Logger.log(`[LAYOUT] V window ${window.get_id()}: target=(${targetX},${targetY}) size=${windowDesc.width}x${windowDesc.height}`);
-                                const slot = { x: targetX, y: targetY, width: windowDesc.width, height: windowDesc.height };
-                                ComputedLayouts.set(window, slot);
-                                if (slotsOut) slotsOut.set(window.get_id(), slot);
-                                windowLayouts.push({ window, rect: slot });
-                            }
-                        }
-                        y += windowDesc.height + constants.WINDOW_SPACING;
-                    }
-                    x += level.width + constants.WINDOW_SPACING;
-                }
+                y += level.height + constants.WINDOW_SPACING;
             }
+        } else {
+            // Vertical layout: each level is a column
+            let x = tile_info.x;
+            for (const level of levels) {
+                let y = level.y;
+                for (const windowDesc of level.windows) {
+                    // Use targetX/targetY if set, otherwise calculate
+                    const targetX = windowDesc.targetX !== undefined ? windowDesc.targetX : x;
+                    const targetY = windowDesc.targetY !== undefined ? windowDesc.targetY : y;
 
-            this._animationsManager.animateReTiling(windowLayouts, draggedWindow, miniLayouts);
+                    const window = meta_windows.find(w => w.get_id() === windowDesc.id);
+                    if (window) {
+                        if (WindowState.get(window, IS_MINIATURE)) {
+                            // Do NOT move_frame for miniatures (Mutter may reject)
+                            const actor = window.get_compositor_private();
+                            const sc = WindowState.get(window, MINIATURE_SCALE) ?? 1;
+                            const extL = WindowState.get(window, MINIATURE_EXT_LEFT) ?? 0;
+                            const extT = WindowState.get(window, MINIATURE_EXT_TOP) ?? 0;
+                            if (actor && !actor.is_destroyed()) {
+                                animateMiniatureToTarget(actor, window, sc, extL, extT, targetX, targetY,
+                                    constants.ANIMATION_DURATION_MS);
+                                WindowState.get(window, MINIATURE_OVERLAY)?.animateToPosition(constants.ANIMATION_DURATION_MS);
+                            }
+                            // MosaicLayoutStrategy reads ComputedLayouts for the overview slot, so keep it in sync.
+                            const miniSlot = { x: targetX, y: targetY, width: windowDesc.width, height: windowDesc.height };
+                            ComputedLayouts.set(window, miniSlot);
+                            if (slotsOut) slotsOut.set(window.get_id(), miniSlot);
+                            Logger.log(`[MINIATURE] animateTile V ${window.get_id()}: target=(${targetX},${targetY}) scale=${sc.toFixed(4)} extLeft=${extL} extTop=${extT} slotSize=${windowDesc.width}x${windowDesc.height}`);
+                        } else if (windowDesc.id === resizingWindowId) {
+                            window.move_frame(false, targetX, targetY);
+                        } else if (pendingMiniIds.has(window.get_id())) {
+                            // Pending miniature: capture slot, but skip animateReTiling.
+                            // createMiniature handles all visual animation; concurrent
+                            // move_resize_frame would shift actor mid-animation.
+                            const slot = { x: targetX, y: targetY, width: windowDesc.width, height: windowDesc.height };
+                            ComputedLayouts.set(window, slot);
+                            if (slotsOut) slotsOut.set(window.get_id(), slot);
+                            miniLayouts.push({ window, rect: slot });
+                            Logger.log(`[LAYOUT] V pending-mini ${window.get_id()}: slot=(${slot.x},${slot.y}) size=${slot.width}x${slot.height}`);
+                        } else {
+                            Logger.log(`[LAYOUT] V window ${window.get_id()}: target=(${targetX},${targetY}) size=${windowDesc.width}x${windowDesc.height}`);
+                            const slot = { x: targetX, y: targetY, width: windowDesc.width, height: windowDesc.height };
+                            ComputedLayouts.set(window, slot);
+                            if (slotsOut) slotsOut.set(window.get_id(), slot);
+                            windowLayouts.push({ window, rect: slot });
+                        }
+                    }
+                    y += windowDesc.height + constants.WINDOW_SPACING;
+                }
+                x += level.width + constants.WINDOW_SPACING;
+            }
         }
+
+        this._animationsManager.animateReTiling(windowLayouts, draggedWindow, miniLayouts);
 
         // Release workspace lock after signals from move_resize have likely fired.
         // We use a safe delay matching the animation duration.
