@@ -106,15 +106,26 @@ export const AnimationsManager = GObject.registerClass({
         this._isDragging = dragging;
     }
 
+    // TODO: a normal window sometimes snaps instead of easing while miniatures still
+    // animate; the [ANIM-DIAG] logs below catch which gate blocked it when it happens.
     shouldAnimateWindow(window, draggedWindow = null) {
-        if (!getAnimationsEnabled()) return false;
-        if (Main.overview.visible) return false;
+        const id = window.get_id();
+        if (!getAnimationsEnabled()) {
+            Logger.log(`[ANIM-DIAG] shouldAnimate ${id}: FALSE (animationsEnabled=off)`);
+            return false;
+        }
+        if (Main.overview.visible) {
+            Logger.log(`[ANIM-DIAG] shouldAnimate ${id}: FALSE (overview.visible)`);
+            return false;
+        }
         // During active resize, position all sibling windows instantly (real-time retile)
         if (this._resizingWindowId !== null) {
+            Logger.log(`[ANIM-DIAG] shouldAnimate ${id}: FALSE (resizingWindowId=${this._resizingWindowId})`);
             return false;
         }
 
         if (draggedWindow && window.get_id() === draggedWindow.get_id()) {
+            Logger.log(`[ANIM-DIAG] shouldAnimate ${id}: FALSE (isDraggedWindow)`);
             return false;
         }
 
@@ -144,6 +155,7 @@ export const AnimationsManager = GObject.registerClass({
                 return;
             }
 
+            Logger.log(`[ANIM-DIAG] animateWindow ${window.get_id()}: SNAP (no ease, firstPlacement=${firstPlacement})`);
             WindowState.set(window, 'isMosaicResizing', true);
             window.move_resize_frame(userOp, targetRect.x, targetRect.y, targetRect.width, targetRect.height);
             this._clearMosaicResizingSoon(window);
@@ -251,10 +263,12 @@ export const AnimationsManager = GObject.registerClass({
         // outpaces the actor's own mapping, so defer until onWindowCreated (windowHandler.js)
         // confirms it's mapped, instead of calling ease() now and having it get skipped.
         if (firstPlacement && !windowActor.mapped) {
+            Logger.log(`[ANIM-DIAG] animateWindow ${window.get_id()}: DEFERRED entrance (actor not mapped)`);
             this._pendingEntranceEases.set(window.get_id(), { windowActor, ...easeParams });
             return;
         }
 
+        Logger.log(`[ANIM-DIAG] animateWindow ${window.get_id()}: EASE (firstPlacement=${firstPlacement}, mode=${animationMode})`);
         this._runEntranceEase(window, windowActor, easeParams);
     }
 
@@ -325,6 +339,7 @@ export const AnimationsManager = GObject.registerClass({
         this._pendingEntranceEases.delete(window.get_id());
         const { windowActor, ...easeParams } = pending;
         if (!windowActor || windowActor.is_destroyed()) return;
+        Logger.log(`[ANIM-DIAG] runDeferredEntrance ${window.get_id()}: EASE (deferred entrance firing)`);
         this._runEntranceEase(window, windowActor, easeParams);
     }
 
