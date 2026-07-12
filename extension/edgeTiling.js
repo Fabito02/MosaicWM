@@ -28,6 +28,7 @@ export const EdgeTilingManager = GObject.registerClass({
         this._animationsManager = null;
         this._tilingManager = null;
         this._windowingManager = null;
+        this._miniatureManager = null;
         this._timeoutRegistry = null;
     }
 
@@ -82,6 +83,7 @@ export const EdgeTilingManager = GObject.registerClass({
         this._animationsManager = null;
         this._tilingManager = null;
         this._windowingManager = null;
+        this._miniatureManager = null;
         this._timeoutRegistry = null;
     }
 
@@ -236,8 +238,10 @@ export const EdgeTilingManager = GObject.registerClass({
                 });
 
                 if (existingWindow) {
-                    const frame = existingWindow.get_frame_rect();
-                    existingWidth = frame.width;
+                    // Mid-animation the frame is a transient size; the ease target is the width it will
+                    // settle at, so a freshly auto-tiled partner splits 50/50 instead of chasing the blur.
+                    const animTarget = this._animationsManager?.getAnimatingTarget(existingWindow.get_id());
+                    existingWidth = animTarget?.width ?? existingWindow.get_frame_rect().width;
                     Logger.log(`getZoneRect: Found existing tiled window with width ${existingWidth}px`);
                 }
             }
@@ -539,6 +543,31 @@ export const EdgeTilingManager = GObject.registerClass({
         return state && state.zone !== TileZone.NONE;
     }
 
+    // Can this window be resized to fill a zone? A max-size cap below the zone means it can't,
+    // so such a window stays in the mosaic (miniaturized) instead of being paired as a half-tile.
+    isEdgeTileable(window, zoneRect) {
+        if (!this._canResize(window)) return false;
+        if (zoneRect && window.get_max_size) {
+            const [hasMax, maxW, maxH] = window.get_max_size();
+            if (hasMax && maxW > 0 && maxH > 0 && (maxW < zoneRect.width || maxH < zoneRect.height))
+                return false;
+        }
+        return true;
+    }
+
+    // Edge tiling and miniaturization are exclusive; drop the miniature and reset the actor
+    // transform so the enforce effect stops scaling this window down inside its zone.
+    _dropMiniature(window) {
+        if (!this._miniatureManager || !WindowState.get(window, IS_MINIATURE)) return;
+        this._miniatureManager.destroyMiniature(window);
+        const actor = window.get_compositor_private();
+        if (actor) {
+            actor.remove_all_transitions();
+            actor.set_scale(1, 1);
+            actor.set_translation(0, 0, 0);
+        }
+    }
+
     checkQuarterExpansion(workspace, monitor) {
         const edgeTiledWindows = this.getEdgeTiledWindows(workspace, monitor);
         if (edgeTiledWindows.length === 0) return;
@@ -633,6 +662,10 @@ export const EdgeTilingManager = GObject.registerClass({
 
     setWindowingManager(windowingManager) {
         this._windowingManager = windowingManager;
+    }
+
+    setMiniatureManager(miniatureManager) {
+        this._miniatureManager = miniatureManager;
     }
 
     // Check if window can be resized to target dimensions
@@ -737,6 +770,11 @@ export const EdgeTilingManager = GObject.registerClass({
         window.unmaximize();
 
         this._timeoutRegistry.addIdle(() => {
+            this._dropMiniature(window);
+            // The zone dictates this window's frame now, so a leftover smart-resize target would
+            // only make the clamp detector learn a false minimum against it.
+            WindowState.remove(window, 'targetSmartResizeSize');
+
             if (this._animationsManager) {
                 this._animationsManager.animateWindow(window, rect, { subtle: true });
             } else {
@@ -869,6 +907,17 @@ export const EdgeTilingManager = GObject.registerClass({
 
         const savedWidth = savedState.width;
         const savedHeight = savedState.height;
+        const savedZone = savedState.zone;
+
+        // Clear our own zone first so a cascading dependent measures free space without counting this tile.
+        savedState.zone = TileZone.NONE;
+
+        // Back to a normal window: restore the pre-tiling preferred size and drop any mosaic-learned minimum.
+        WindowState.set(window, 'preferredSize', { width: savedWidth, height: savedHeight });
+        WindowState.remove(window, 'actualMinWidth');
+        WindowState.remove(window, 'actualMinHeight');
+        WindowState.remove(window, 'targetSmartResizeSize');
+        WindowState.set(window, 'isConstrainedByMosaic', false);
 
         Logger.log(`removeTile: Checking dependencies for master=${winId}`);
         const dependents = WindowState.get(window, 'autoTileDependents');
@@ -895,10 +944,10 @@ export const EdgeTilingManager = GObject.registerClass({
             WindowState.remove(window, 'autoTileMaster');
         }
 
-        if (this._isQuarterZone(savedState.zone)) {
-            Logger.log(`Quarter tile ${winId} being removed from zone ${savedState.zone}`);
+        if (this._isQuarterZone(savedZone)) {
+            Logger.log(`Quarter tile ${winId} being removed from zone ${savedZone}`);
 
-            const adjacentZone = this._getAdjacentQuarterZone(savedState.zone);
+            const adjacentZone = this._getAdjacentQuarterZone(savedZone);
             if (adjacentZone) {
                 const adjacentWindow = this._findWindowInZone(adjacentZone, window.get_workspace());
 
@@ -918,45 +967,18 @@ export const EdgeTilingManager = GObject.registerClass({
             }
         }
 
-        savedState.zone = TileZone.NONE;
-
         if (window.is_maximized()) {
             window.unmaximize();
         }
 
-        const workspace = window.get_workspace();
-        const monitor = window.get_monitor();
-
-        // Calculate remaining mosaic space after edge tiles
-        const remainingSpace = this.calculateRemainingSpace(workspace, monitor);
-
-        // Check if saved size fits in remaining space, resize if needed
-        let finalWidth = savedWidth;
-        let finalHeight = savedHeight;
-
-        if (remainingSpace.width > 0 && remainingSpace.height > 0) {
-            // Leave some margin (80% of available space max)
-            const maxWidth = Math.floor(remainingSpace.width * 0.85);
-            const maxHeight = Math.floor(remainingSpace.height * 0.85);
-
-            if (savedWidth > maxWidth || savedHeight > maxHeight) {
-                // Scale down proportionally while maintaining aspect ratio
-                const widthRatio = maxWidth / savedWidth;
-                const heightRatio = maxHeight / savedHeight;
-                const scale = Math.min(widthRatio, heightRatio, 1);
-
-                finalWidth = Math.floor(savedWidth * scale);
-                finalHeight = Math.floor(savedHeight * scale);
-                Logger.log(`removeTile: Window ${winId} resized to fit: ${savedWidth}x${savedHeight} -> ${finalWidth}x${finalHeight}`);
-            }
-        }
-
+        // Restore the pre-tiling size as it was. Whether it still fits is the mosaic's call, and it
+        // shrinks or miniaturizes accordingly; pre-shrinking here would just lose the size for good.
         const [cursorX, cursorY] = global.get_pointer();
-        const restoredX = cursorX - (finalWidth / 2);
+        const restoredX = cursorX - (savedWidth / 2);
         const restoredY = cursorY - 20;
 
-        Logger.log(`removeTile: Restoring window ${winId} to size ${finalWidth}x${finalHeight} at cursor (${restoredX}, ${restoredY})`);
-        window.move_resize_frame(false, restoredX, restoredY, finalWidth, finalHeight);
+        Logger.log(`removeTile: Restoring window ${winId} to size ${savedWidth}x${savedHeight} at cursor (${restoredX}, ${restoredY})`);
+        window.move_resize_frame(false, restoredX, restoredY, savedWidth, savedHeight);
 
         if (callback) {
             this._timeoutRegistry.add(constants.RETILE_DELAY_MS, () => {
@@ -1007,25 +1029,29 @@ export const EdgeTilingManager = GObject.registerClass({
             return;
         }
 
-        // Single edge tile - check if we should auto-tile the single mosaic window
+        // Single edge tile: pair the last window into the opposite half instead of miniaturizing it.
         if (mosaicWindows.length === 1) {
             const mosaicWindow = mosaicWindows[0];
 
-            // Only auto-tile to opposite side for FULL zones
-            // When only one mosaic window remains, always auto-tile it to the opposite side
             if (zone === TileZone.LEFT_FULL || zone === TileZone.RIGHT_FULL) {
                 const oppositeZone = (zone === TileZone.LEFT_FULL) ? TileZone.RIGHT_FULL : TileZone.LEFT_FULL;
+                const oppositeRect = this.getZoneRect(oppositeZone, workArea, mosaicWindow);
 
-                Logger.log(`_handleMosaicOverflow: auto-tiling single window ${mosaicWindow.get_id()} to opposite zone ${oppositeZone}`);
+                // A window that can't fill the half (max-size capped) falls through to the miniature path.
+                if (oppositeRect && this.isEdgeTileable(mosaicWindow, oppositeRect)) {
+                    Logger.log(`_handleMosaicOverflow: auto-tiling single window ${mosaicWindow.get_id()} to opposite zone ${oppositeZone}`);
 
-                this._timeoutRegistry.add(100, () => {
+                    // Reserve the zone and drop any miniature synchronously so the trigger's size-changed
+                    // retile treats this window as tiled before applyTile positions it, with no race.
+                    this.saveWindowState(mosaicWindow);
+                    const oppState = this.getWindowState(mosaicWindow);
+                    if (oppState) oppState.zone = oppositeZone;
+                    this._dropMiniature(mosaicWindow);
+
                     this.applyTile(mosaicWindow, oppositeZone, workArea);
-
                     this.registerAutoTileDependency(mosaicWindow, tiledWindow);
-
-                    return GLib.SOURCE_REMOVE;
-                }, 'edgeTiling_autoTileOpposite');
-                return;
+                    return;
+                }
             }
         }
 

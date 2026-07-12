@@ -96,6 +96,11 @@ export const ResizeHandler = GObject.registerClass({
     // A frame above target shortly after window creation might just be the client
     // still negotiating its own size, not a real minimum, so hold the commit.
     _shouldDeferClampCommit(window) {
+        // The frame settles relative to when the target was applied, not when the window was born;
+        // an old window handed a fresh target is still mid-shrink, not clamping.
+        const setAt = WindowState.get(window, 'targetSmartResizeSetAt');
+        if (setAt !== undefined && (Date.now() - setAt) < constants.RESIZE_CLAMP_SETTLE_WINDOW_MS)
+            return true;
         const addedTime = WindowState.get(window, 'addedTime');
         if (addedTime === undefined) return false;
         return (Date.now() - addedTime) < constants.RESIZE_CLAMP_SETTLE_WINDOW_MS;
@@ -437,7 +442,13 @@ export const ResizeHandler = GObject.registerClass({
                 Math.abs(rect.height - easeTarget.height) <= constants.EASE_TARGET_TOLERANCE_PX;
             const clientOwnedSize = !!easeTarget && !isEaseEcho;
 
-            if (isMonitorSized) {
+            const edgeState = this.edgeTilingManager.getWindowState(window);
+            const isEdgeTiledNow = edgeState && edgeState.zone !== TileZone.NONE;
+
+            if (isEdgeTiledNow) {
+                // An edge tile's frame comes from its zone, so preferredSize stays the pre-tiling value.
+                Logger.log(`onSizeChanged: preferredSize preserved for edge-tiled ${window.get_id()}`);
+            } else if (isMonitorSized) {
                 Logger.log(`onSizeChanged: Rejected monitor-sized dimensions ${rect.width}x${rect.height} for ${window.get_id()}`);
             } else if (userForcedResize) {
                 // Manual resize always updates preferredSize and clears constraints
@@ -598,6 +609,13 @@ export const ResizeHandler = GObject.registerClass({
                 // draw() repositions windows via move_resize_frame during a drag; those geometry
                 // changes must not trigger overflow ejection. The drag handler owns all overflow decisions.
                 if (this.tilingManager.isDragging) {
+                    this._sizeChanged = false;
+                    return;
+                }
+
+                // Leaving an edge tile briefly restores a full-size window into a tight mosaic; that
+                // transient over-size frame must miniaturize in place, not eject to a new workspace.
+                if (this._ext.dragHandler?._restoringFromEdgeTile) {
                     this._sizeChanged = false;
                     return;
                 }

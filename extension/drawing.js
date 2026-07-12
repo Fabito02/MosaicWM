@@ -19,6 +19,8 @@ export const DrawingManager = GObject.registerClass({
 
         // Tile preview overlay for edge tiling
         this._tilePreview = null;
+        // Second overlay for the lone window that will be auto-tiled to the opposite zone
+        this._companionPreview = null;
 
         this._edgeTilingManager = null;
     }
@@ -81,10 +83,35 @@ export const DrawingManager = GObject.registerClass({
         this._tilePreview.show();
     }
 
+    // The lone mosaic window becomes the opposite half, so it gets its own preview instead of
+    // being drawn as a miniature. Callers pass the already-computed opposite zone rect.
+    showCompanionTilePreview(rect) {
+        if (!rect) return;
+
+        if (!this._companionPreview) {
+            this._companionPreview = new St.Widget({
+                style_class: 'tile-preview',
+                opacity: 128
+            });
+            Main.uiGroup.add_child(this._companionPreview);
+        }
+
+        this._companionPreview.set_position(rect.x, rect.y);
+        this._companionPreview.set_size(rect.width, rect.height);
+        this._companionPreview.show();
+    }
+
+    hideCompanionTilePreview() {
+        if (this._companionPreview) {
+            this._companionPreview.hide();
+        }
+    }
+
     hideTilePreview() {
         if (this._tilePreview) {
             this._tilePreview.hide();
         }
+        this.hideCompanionTilePreview();
     }
 
     clearActors() {
@@ -103,6 +130,13 @@ export const DrawingManager = GObject.registerClass({
                 Main.uiGroup.remove_child(this._tilePreview);
             this._tilePreview.destroy();
             this._tilePreview = null;
+        }
+
+        if (this._companionPreview) {
+            if (this._companionPreview.get_parent())
+                Main.uiGroup.remove_child(this._companionPreview);
+            this._companionPreview.destroy();
+            this._companionPreview = null;
         }
         this._edgeTilingManager = null;
     }

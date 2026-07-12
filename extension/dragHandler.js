@@ -30,7 +30,6 @@ export const DragHandler = GObject.registerClass({
         this._currentZone = TileZone.NONE;
         this._dragPositionChangedId = 0;
         this._isPositionProcessing = false;
-        this._dragOverflowWindow = null;
         this._currentGrabOp = null;
         this._restoringFromEdgeTile = false;
         this._skipNextTiling = null;
@@ -127,23 +126,21 @@ export const DragHandler = GObject.registerClass({
                         (isMoveGrabOp(grabpo) || grabpo === Meta.GrabOp.KEYBOARD_MOVING) &&
                         window && !this.windowingManager.isMaximizedOrFullscreen(window)
                     ) {
-                        const workspace = window.get_workspace();
-                        const monitor = window.get_monitor();
-                        const fits = this.tilingManager.canFitWindow(window, workspace, monitor, true);
+                        // Build the mosaic before drag mode starts, since once isDragging is set the
+                        // mosaic stops miniaturizing and could never form around the window we hold.
+                        Logger.log('Edge tiling: building mosaic for the windows that left the tile');
+                        this.tilingManager.tileWorkspaceWindows(
+                            window.get_workspace(), window, window.get_monitor(), false);
 
-                        if (!fits) {
-                            Logger.log('Edge tile exit: window doesn\'t fit - applying overflow opacity');
-                            const actor = window.get_compositor_private();
-                            if (actor) {
-                                actor.opacity = 128;
-                            }
-                            this._dragOverflowWindow = window;
-                            this.tilingManager.setExcludedWindow(window);
-                            this.drawingManager.hideTilePreview();
-                            this.drawingManager.removeBoxes();
-                        } else {
-                            Logger.log(`_grabOpBeginHandler: calling startDrag for window ${window.get_id()}`);
-                            this.reorderingManager.startDrag(window);
+                        Logger.log(`_grabOpBeginHandler: calling startDrag for window ${window.get_id()}`);
+                        this.reorderingManager.startDrag(window);
+                        this._lastReorderMonitor = global.display.get_current_monitor();
+
+                        // The grab is still live, so this drag needs the position listener a normal one
+                        // gets; without it there is no live mosaic and no zone to snap back into.
+                        if (!this._dragPositionChangedId) {
+                            Logger.log('Connecting signal-based edge tiling listeners (edge tile exit)');
+                            this._dragPositionChangedId = window.connect('position-changed', this._onDragPositionChanged.bind(this));
                         }
                     }
                 });
@@ -177,41 +174,6 @@ export const DragHandler = GObject.registerClass({
 
     _grabOpEndHandler = (_display, window, grabpo) => {
         this._currentGrabOp = null;
-
-        // Handle drag overflow - window that was marked as not fitting
-        if (this._dragOverflowWindow && this._dragOverflowWindow === window) {
-            Logger.log('Drag ended with overflow window - moving to new workspace');
-            const actor = this._dragOverflowWindow.get_compositor_private();
-            if (actor) actor.opacity = 255; // Restore opacity
-
-            this.tilingManager.clearExcludedWindow();
-            this.drawingManager.hideTilePreview();
-            this.drawingManager.removeBoxes();
-
-            const oldWorkspace = window.get_workspace();
-            this.windowingManager.moveOversizedWindow(window).catch(e =>
-                Logger.error(`Drag overflow failed: ${e}`));
-            afterAnimations(this.animationsManager, () => {
-                const monitor = window.get_monitor();
-                if (monitor !== null) {
-                    this.tilingManager.tileWorkspaceWindows(oldWorkspace, null, monitor, false);
-                }
-            }, this._timeoutRegistry);
-
-            this._dragOverflowWindow = null;
-            this._draggedWindow = null;
-            this._currentZone = TileZone.NONE;
-
-            if (this._dragPositionChangedId && window) {
-                try {
-                    window.disconnect(this._dragPositionChangedId);
-                } catch (e) {
-                    Logger.log(`Failed to disconnect signal on drag end (overflow): ${e.message}`);
-                }
-                this._dragPositionChangedId = 0;
-            }
-            return;
-        }
 
         if ((isMoveGrabOp(grabpo) || grabpo === Meta.GrabOp.KEYBOARD_MOVING) && window === this._draggedWindow) {
             if (this._dragPositionChangedId && window) {
@@ -379,7 +341,19 @@ export const DragHandler = GObject.registerClass({
 
                 const result = this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, monitor, false);
 
-                if (result?.overflow) {
+                // A lone window that can fill the opposite half gets auto-tiled there on drop, so it
+                // gets its own tile preview. Miniaturizing it here would preview something that won't happen.
+                const pairsIntoOppositeHalf =
+                    mosaicWindows.length === 1 &&
+                    (zone === TileZone.LEFT_FULL || zone === TileZone.RIGHT_FULL) &&
+                    this.edgeTilingManager.isEdgeTileable(mosaicWindows[0], remainingSpace);
+
+                this.drawingManager.hideCompanionTilePreview();
+
+                if (pairsIntoOppositeHalf) {
+                    Logger.log(`Edge tiling: previewing ${mosaicWindows[0].get_id()} as opposite half ${remainingSpace.width}x${remainingSpace.height}`);
+                    this.drawingManager.showCompanionTilePreview(remainingSpace);
+                } else if (result?.overflow) {
                     const miniSlots = this.tilingManager.computePreviewMiniSlots(mosaicWindows, remainingSpace);
                     for (const { win, slot, scale } of miniSlots) {
                         const actor = win.get_compositor_private();
@@ -469,7 +443,6 @@ export const DragHandler = GObject.registerClass({
         this._currentZone = null;
         this._restoringFromEdgeTile = false;
         this._isPositionProcessing = false;
-        this._dragOverflowWindow = null;
         this._currentGrabOp = null;
     }
 } );

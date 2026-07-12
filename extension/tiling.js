@@ -216,6 +216,13 @@ export const TilingManager = GObject.registerClass({
         return { width: baseW, height: baseH };
     }
 
+    // Stamp when a shrink target is applied so the clamp detector can tell "hasn't shrunk yet"
+    // (transient) from "won't shrink" (a real minimum), keyed off the target, not the window's age.
+    _setSmartResizeTarget(window, size) {
+        WindowState.set(window, 'targetSmartResizeSize', { width: size.width, height: size.height });
+        WindowState.set(window, 'targetSmartResizeSetAt', Date.now());
+    }
+
     // Native maximum size via Mutter 50+ get_max_size()
     getWindowMaximumSize(window) {
         if (window.get_max_size) {
@@ -2748,7 +2755,7 @@ export const TilingManager = GObject.registerClass({
                             WindowState.set(w, 'targetSmartResizeSize', null);
                         } else {
                             // Still constrained, but update mask
-                            WindowState.set(w, 'targetSmartResizeSize', { width: sim.width, height: sim.height });
+                            this._setSmartResizeTarget(w, sim);
                         }
                     }
                 }
@@ -3105,7 +3112,7 @@ export const TilingManager = GObject.registerClass({
                     WindowState.set(w, 'preferredSize', { width: d.current.width, height: d.current.height });
                 WindowState.set(w, 'originalSize', { width: d.current.width, height: d.current.height });
                 WindowState.set(w, 'isConstrainedByMosaic', true);
-                WindowState.set(w, 'targetSmartResizeSize', { width: sim.width, height: sim.height });
+                this._setSmartResizeTarget(w, sim);
 
                 if (d.pendingMiniature) {
                     const storedPreSize = d.pendingPreSize || d.current;
@@ -3261,7 +3268,7 @@ export const TilingManager = GObject.registerClass({
 
                 const w = d.window;
                 const frame = w.get_frame_rect();
-                WindowState.set(w, 'targetSmartResizeSize', { width: sim.width, height: sim.height });
+                this._setSmartResizeTarget(w, sim);
                 WindowState.set(w, 'isConstrainedByMosaic', true);
 
                 this._animateResize(w, frame, sim.width, sim.height, true);

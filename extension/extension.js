@@ -254,6 +254,7 @@ export default class WindowMosaicExtension extends Extension {
         this.miniatureManager = new MiniatureManager();
         this.miniatureManager.setTimeoutRegistry(this._timeoutRegistry);
         this.miniatureManager.setAnimationsManager(this.animationsManager);
+        this.edgeTilingManager.setMiniatureManager(this.miniatureManager);
         this._miniatureCascadeIds = new Set();
         this._lastFocusedWindowId = null;
 
