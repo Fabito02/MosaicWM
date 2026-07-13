@@ -116,21 +116,18 @@ export const WindowHandler = GObject.registerClass({
         return this._isEvaluatingQueue;
     }
 
-    // Accessor shortcuts
     get windowingManager() { return this._ext.windowingManager; }
     get tilingManager() { return this._ext.tilingManager; }
     get edgeTilingManager() { return this._ext.edgeTilingManager; }
     get animationsManager() { return this._ext.animationsManager; }
     get _timeoutRegistry() { return this._ext._timeoutRegistry; }
 
-    // Connect deterministic signals for window lifecycle
     connectWindowSignals(window) {
         if (!window || this._windowSignals.has(window)) return;
 
         Logger.log(`Connecting signals for window ${window.get_id()}`);
         const ids = [];
 
-        // Final cleanup signal
         ids.push(window.connect('unmanaged', (win) => {
             Logger.log(`Window ${win.get_id()} (unmanaged) - cleaning up`);
             this.animationsManager.removeAnimatingWindow(win.get_id());
@@ -139,7 +136,7 @@ export const WindowHandler = GObject.registerClass({
             this.disconnectWindowSignals(win);
         }));
 
-        // Detect Maximized changes. Have two signals that fires when (un)maximize, so we coalesce it via idle.
+        // Have two signals that fires when (un)maximize, so we coalesce it via idle.
         let pendingMaximizeCheck = false;
         ['notify::maximized-horizontally', 'notify::maximized-vertically'].forEach(signal => {
             ids.push(window.connect(signal, (win) => {
@@ -217,7 +214,6 @@ export const WindowHandler = GObject.registerClass({
             }
         }));
 
-        // Smart resize completion: clear bridge state and retile
         ids.push(window.connect('size-changed', (win) => {
             ComputedLayouts.delete(win);
             if (WindowState.get(win, 'isSmartResizing') || WindowState.get(win, 'isReverseSmartResizing')) {
@@ -235,7 +231,6 @@ export const WindowHandler = GObject.registerClass({
             ComputedLayouts.delete(win);
         }));
 
-        // Track for lifecycle exclusion updates
         ids.push(window.connect('notify::above', (win) => this.handleExclusionStateChange(win)));
         ids.push(window.connect('notify::on-all-workspaces', (win) => this.handleExclusionStateChange(win)));
         ids.push(window.connect('notify::minimized', (win) => this.handleExclusionStateChange(win)));
@@ -269,7 +264,6 @@ export const WindowHandler = GObject.registerClass({
         WindowState.remove(window, 'previousWorkspace');
     }
 
-    // Handle window unmaximize event.
     onWindowUnmaximized(window) {
         const workspace = window.get_workspace();
         if (!workspace) return;
@@ -291,7 +285,6 @@ export const WindowHandler = GObject.registerClass({
         }
     }
 
-    // Handle exclusion state transitions (Always on Top, Sticky, etc.)
     handleExclusionStateChange(window) {
         const windowId = window.get_id();
         const workspace = window.get_workspace();
@@ -523,7 +516,6 @@ export const WindowHandler = GObject.registerClass({
         }
     }
 
-    // Executes when a window is physically destroyed
     onWindowDestroyed(window) {
         const monitor = window.get_monitor();
         const windowId = window.get_id();
@@ -614,13 +606,11 @@ export const WindowHandler = GObject.registerClass({
         }
     }
 
-    // Ensures a new window fits via smart resize, queued to handle rapid spawns.
     enqueueWindowForEvaluation(window, workspace, monitor) {
         const windowId = window.get_id();
         // A (re)considered window voids any earlier close-retile dedup claim; cleared
         // before the dedupe returns below so a skipped re-enqueue still resets it.
         WindowState.remove(window, 'closeRetileHandledAt');
-        // Deduplicate
         if (this._evaluationQueue.some(entry => entry.window.get_id() === windowId)) {
             Logger.log(`Skipping duplicate enqueue for window ${windowId}`);
             return;
@@ -754,7 +744,6 @@ export const WindowHandler = GObject.registerClass({
         this._isEvaluatingQueue = false;
     }
 
-    // Returns the final workspace the window landed in, useful for tracking overflow destinations
     async _ensureWindowFits(window, workspace, monitor) {
         if (this._ext && !this._ext.isMosaicEnabledForWorkspace(workspace)) {
             Logger.log('ensureWindowFits: Skipping - mosaic disabled for workspace');
@@ -771,8 +760,7 @@ export const WindowHandler = GObject.registerClass({
             return workspace;
         }
 
-        // Path 1: Sacred Isolation (symmetric isolation enforcement). Runs before the
-        // constrained fast path, since tiling refuses sacred workspaces and would
+        // Runs before constrained fast path: tiling refuses sacred workspaces and would
         // strand a constrained arrival floating there.
         const isIncomingSacred = this.windowingManager.isMaximizedOrFullscreen(window);
         const hasExistingSacred = this.windowingManager.hasSacredWindow(workspace, monitor, window.get_id());
@@ -795,7 +783,6 @@ export const WindowHandler = GObject.registerClass({
         // Save preferred size after sacred checks, to avoid capturing monitor-sized dimensions
         this.tilingManager.savePreferredSize(window);
 
-        // Path 2: DnD Arrival Handling (Expansion)
         if (WindowState.get(window, 'arrivedFromDnD')) {
             WindowState.set(window, 'arrivedFromDnD', false);
             const monitorWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor)
@@ -829,7 +816,7 @@ export const WindowHandler = GObject.registerClass({
             }
         }
 
-        // Path 3: Fitting & Smart Resize
+
         // Use TARGET size for restoration flows to avoid transient overflow ejection.
         const targetSize = WindowState.get(window, 'targetRestoredSize');
         const canFit = this.tilingManager.canFitWindow(window, workspace, monitor, false, targetSize);
@@ -840,7 +827,7 @@ export const WindowHandler = GObject.registerClass({
             return workspace;
         }
 
-        // Path 4: Smart Resize attempt
+
         const workArea = this.tilingManager.getUsableWorkArea(workspace, monitor);
 
         const allExistingWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor)
@@ -872,7 +859,7 @@ export const WindowHandler = GObject.registerClass({
             }
         }
 
-        // Path 5: Overflow (Final fallback)
+
         Logger.log(`Smart resize failed or skipped - applying Overflow logic (existingWindows=${existingWindows.length}, blocked=${this.tilingManager._isSmartResizingBlocked})`);
         return await this.windowingManager.moveOversizedWindow(window);
     }

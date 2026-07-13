@@ -32,8 +32,6 @@ export class TimeoutRegistry {
         this._nextId = 1;
     }
 
-    // Sources stay registered while the callback returns GLib.SOURCE_CONTINUE,
-    // so clearAll() on disable can remove recurring polls too.
     add(delay, callback, name = 'unnamed') {
         const registryId = this._nextId++;
         const sourceId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
@@ -159,10 +157,9 @@ export function afterAnimations(animationsManager, callback, registry, maxWait =
         callback();
     };
 
-    // 1. Deterministic signal: fires when all tracked animations finish
     signalId = animationsManager.connect('animations-completed', trigger);
 
-    // 2. Safety fallback in case the signal never arrives (e.g. animation cancelled mid-flight)
+
     const adjustedMaxWait = Math.ceil(maxWait * getSlowDownFactor());
     timeoutId = registry.add(adjustedMaxWait, () => {
         Logger.log('afterAnimations: Safety timeout triggered');
@@ -194,7 +191,6 @@ export function waitForGeometry(window, callback, registry, maxAttempts = consta
         callback(window);
     };
 
-    // Use size-changed as deterministic signal
     signalId = window.connect('size-changed', () => {
         const f = window.get_frame_rect();
         if (f.width > 10 && f.height > 10) {
@@ -202,7 +198,7 @@ export function waitForGeometry(window, callback, registry, maxAttempts = consta
         }
     });
 
-    // Safety timeout (derived from max attempts * 50ms)
+
     const timeoutDuration = maxAttempts * 50;
     timeoutId = registry.add(timeoutDuration, () => {
         Logger.log('waitForGeometry: Safety timeout triggered');
@@ -224,8 +220,6 @@ export function afterWindowClose(callback, registry) {
     });
 }
 
-// Executes callback after overview is hidden (waits for exit animation)
-// If overview is not visible, executes immediately
 export function afterOverviewHidden(callback, registry) {
     if (!Main.overview.visible) {
         callback();
@@ -234,8 +228,6 @@ export function afterOverviewHidden(callback, registry) {
 
     Logger.log('Waiting for overview to hide...');
 
-    // 'done' guards against double execution: without it, the failsafe could
-    // re-run the callback if the user reopened the overview within 1s.
     let done = false;
     let timeoutId = null;
 
@@ -248,7 +240,6 @@ export function afterOverviewHidden(callback, registry) {
         callback();
     });
 
-    // Failsafe: if overview doesn't hide within 1s, execute anyway
     timeoutId = registry.add(1000, () => {
         if (!done) {
             done = true;

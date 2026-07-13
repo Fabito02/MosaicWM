@@ -21,7 +21,6 @@ export const ResizeHandler = GObject.registerClass({
         super._init();
         this._ext = extension;
 
-        // Resize state
         this._sizeChanged = false;
         this._resizeOverflowWindow = null;
         this._resizeInOverflow = false;
@@ -31,7 +30,6 @@ export const ResizeHandler = GObject.registerClass({
         this._lastResizeTime = 0;
     }
 
-    // Accessor shortcuts
     get windowingManager() { return this._ext.windowingManager; }
     get tilingManager() { return this._ext.tilingManager; }
     get edgeTilingManager() { return this._ext.edgeTilingManager; }
@@ -71,8 +69,7 @@ export const ResizeHandler = GObject.registerClass({
         this._constraintRebalanceCount = 0;
     }
 
-    // Shared by the size-changed path and the deferred verification: once the
-    // client had its chance, a frame still above target is a genuine minimum.
+    // Once the client had its chance, a frame still above target is a genuine minimum.
     _commitClampedSize(window, pendingSmartSize, rect) {
         Logger.log(`[SMART RESIZE] Window ${window.get_id()} clamped: target=${pendingSmartSize.width}×${pendingSmartSize.height}, actual=${rect.width}×${rect.height}`);
         WindowState.set(window, 'targetSmartResizeSize', { width: rect.width, height: rect.height });
@@ -106,8 +103,8 @@ export const ResizeHandler = GObject.registerClass({
         return (Date.now() - addedTime) < constants.RESIZE_CLAMP_SETTLE_WINDOW_MS;
     }
 
-    // Only the tiler sends geometry; this just watches. A silent client gets its
-    // physical frame committed as truth once the over-target signals go quiet.
+    // Only the tiler sends geometry; a silent client gets its frame committed
+    // as truth once the over-target signals go quiet.
     _armClampVerification(window, pendingSmartSize) {
         this._disarmClampVerification(window);
 
@@ -373,7 +370,7 @@ export const ResizeHandler = GObject.registerClass({
                 return;
             }
 
-            // STATE MACHINE STAGE 2: Deferred Move Completion
+
             const originWorkspaceIndex = WindowState.get(window, 'isRestoringSacred');
             if (originWorkspaceIndex !== undefined) {
                 // If the window is no longer sacred (maximized or fullscreen), it has finished resizing in place.
@@ -422,7 +419,7 @@ export const ResizeHandler = GObject.registerClass({
                 }
             }
 
-            // Mirrors savePreferredSize's guard: a born-maximized window mid-unmaximize can
+            // A born-maximized window mid-unmaximize can
             // report its still-fullscreen frame here before tiling shrinks it, baking it in
             // as preferredSize and making the window read as workspace-filling forever.
             const sizeWorkspace = window.get_workspace();
@@ -484,7 +481,6 @@ export const ResizeHandler = GObject.registerClass({
                 }
             }
 
-            // Mode-Based Lock Cleanup
             WindowState.remove(window, 'isEnteringSacred');
 
             if (this._skipNextTiling === window.get_id()) return;

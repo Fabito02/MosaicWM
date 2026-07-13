@@ -21,7 +21,7 @@ export class SettingsOverrider {
 
         const schemaOverrides = this.#overrides.get(schemaId);
 
-        // Fall back to schema default if value is already overridden (stale disable)
+
         if (!schemaOverrides.has(key)) {
             const currentValue = settings.get_value(key);
             if (currentValue.equal(value)) {
@@ -40,7 +40,7 @@ export class SettingsOverrider {
     clear() {
         if (!this.#overrides) return;
 
-        // Restore original values (not schema defaults)
+
         for (const [schemaId, overrides] of this.#overrides) {
             try {
                 const settings = new Gio.Settings({ schema_id: schemaId });
@@ -58,7 +58,7 @@ export class SettingsOverrider {
             }
         }
 
-        // Flush dconf writes before process may exit (e.g. uninstall)
+        // Flush dconf before process exit (e.g. uninstall).
         Gio.Settings.sync();
 
         this.#overrides.clear();

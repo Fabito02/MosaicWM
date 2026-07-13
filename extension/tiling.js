@@ -370,13 +370,11 @@ export const TilingManager = GObject.registerClass({
         this._excludedWindow = null;
     }
 
-    // Invalidate the layout cache when windows change
     invalidateLayoutCache() {
         this._lastLayoutHash = null;
         this._cachedTileResult = null;
     }
 
-    // Get the cached layout result (array of {id, x, y, width, height})
     getCachedLayout() {
         return this._cachedTileResult?.windows || null;
     }
@@ -418,7 +416,6 @@ export const TilingManager = GObject.registerClass({
         return positions;
     }
 
-    // Pre-compute all valid mosaic layouts for a drag session
     computeDragLayouts(windowDescriptors, workArea, draggedId) {
         const spacing = constants.WINDOW_SPACING;
         const startTime = GLib.get_monotonic_time();
@@ -480,7 +477,6 @@ export const TilingManager = GObject.registerClass({
         return layouts;
     }
 
-    // Apply a pre-computed layout during drag
     applyDragLayout(positions, workspace, monitor) {
         const meta_windows = this._windowingManager.getMonitorWorkspaceWindows(workspace, monitor);
 
@@ -719,7 +715,6 @@ export const TilingManager = GObject.registerClass({
         return descriptors;
     }
 
-    // Generate limited permutations for performance
     _generatePermutations(arr, maxPermutations = 120) {
         if (arr.length <= 1) return [arr];
         if (arr.length === 2) return [arr, [arr[1], arr[0]]];
@@ -763,8 +758,6 @@ export const TilingManager = GObject.registerClass({
         return result;
     }
 
-    // Score a layout result; higher is better
-    // Prioritizes: no overflow, compactness, centralization
     _scoreLayout(tileResult, workArea) {
         if (!tileResult || tileResult.overflow) return -Infinity;
 
@@ -868,7 +861,6 @@ export const TilingManager = GObject.registerClass({
         return Infinity;
     }
 
-    // Find optimal ordering via permutations (with stability bonus for current order)
     _findOptimalOrder(windows, workArea, tilingFn) {
         if (windows.length <= 1) return windows;
 
@@ -925,7 +917,6 @@ export const TilingManager = GObject.registerClass({
         return `${snap(work_area.width)}x${snap(work_area.height)}|${parts.join(',')}`;
     }
 
-    // Tile windows with dynamic orientation and optimal search
     _tile(windows, work_area, isSimulation = false) {
         if (!windows || windows.length === 0) return { levels: [], vertical: false, overflow: false };
 
@@ -1008,7 +999,6 @@ export const TilingManager = GObject.registerClass({
         return result;
     }
 
-    // Vertical shelves layout: windows stack in columns side by side.
     _verticalShelves(windows, work_area, spacing) {
         // For 1-2 windows, use simple centered column
         if (windows.length <= 2) {
@@ -1151,7 +1141,6 @@ export const TilingManager = GObject.registerClass({
         };
     }
 
-    // Helper for 1-2 windows in vertical mode.
     _simpleCenteredColumn(windows, work_area, spacing) {
         // Calculate total height if stacked
         let totalHeight = 0;

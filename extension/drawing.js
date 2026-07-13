@@ -12,14 +12,10 @@ export const DrawingManager = GObject.registerClass({
 }, class DrawingManager extends GObject.Object {
     _init() {
         super._init();
-        // Active feedback boxes
         this._boxes = [];
-        // Pool of reusable boxes (avoids create/destroy churn)
         this._boxPool = [];
 
-        // Tile preview overlay for edge tiling
         this._tilePreview = null;
-        // Second overlay for the lone window that will be auto-tiled to the opposite zone
         this._companionPreview = null;
 
         this._edgeTilingManager = null;
@@ -30,7 +26,6 @@ export const DrawingManager = GObject.registerClass({
     }
 
     rect(x, y, w, h) {
-        // Reuse a pooled box when available; otherwise create a new one in the UI group
         let box;
         if (this._boxPool.length > 0) {
             box = this._boxPool.pop();
@@ -50,7 +45,6 @@ export const DrawingManager = GObject.registerClass({
     }
 
     removeBoxes() {
-        // Recycle boxes instead of destroying
         while(this._boxes.length > 0) {
             const box = this._boxes.pop();
             box.hide();
@@ -59,7 +53,6 @@ export const DrawingManager = GObject.registerClass({
     }
 
     showTilePreview(zone, workArea, window = null) {
-        // Hide mosaic preview when showing edge tiling preview
         this.removeBoxes();
 
         if (!this._edgeTilingManager) {
@@ -117,7 +110,6 @@ export const DrawingManager = GObject.registerClass({
     clearActors() {
         this.removeBoxes();
 
-        // Clean up pool
         while(this._boxPool.length > 0) {
             const box = this._boxPool.pop();
             if (box.get_parent())

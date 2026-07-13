@@ -21,7 +21,6 @@ export const DragHandler = GObject.registerClass({
         super._init();
         this._ext = extension;
 
-        // Drag state
         this._draggedWindow = null;
         this._edgeTileGhostWindows = [];
         this._previewMiniaturizedWindows = [];
@@ -36,7 +35,6 @@ export const DragHandler = GObject.registerClass({
         this._lastReorderMonitor = null;
     }
 
-    // Accessor shortcuts
     get windowingManager() { return this._ext.windowingManager; }
     get tilingManager() { return this._ext.tilingManager; }
     get edgeTilingManager() { return this._ext.edgeTilingManager; }

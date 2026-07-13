@@ -70,7 +70,6 @@ export const ReorderingManager = GObject.registerClass({
             y: _cursor[1]
         };
 
-        // Edge zone — defer to edge tiling handler
         let isOverEdgeZone = false;
         if (this._edgeTilingManager) {
             const zone = this._edgeTilingManager.detectZone(cursor.x, cursor.y, workArea, workspace);
@@ -87,7 +86,7 @@ export const ReorderingManager = GObject.registerClass({
 
         const { layout: closestLayout, distance: minDist } = closest;
 
-        // Hysteresis: require 50% closer to switch layout
+
         if (this._chosenLayout && closestLayout !== this._chosenLayout) {
             const currentDist = this._cursorDistance(cursor, this._chosenLayout.draggedRect);
             if (minDist > currentDist * 0.5) return;
@@ -121,9 +120,8 @@ export const ReorderingManager = GObject.registerClass({
         return `layout-${Math.round(layout.draggedRect.x)}-${Math.round(layout.draggedRect.y)}`;
     }
 
-    // The layout the cursor is over, adopted as chosen but not applied. The edge-zone exit tiles
-    // the mosaic itself (only that path undoes the preview miniatures), so it has to reproduce
-    // this layout; adopting it here is what keeps the next motion from moving everything again.
+    // The edge-zone exit tiles the mosaic itself and needs to reproduce this layout;
+    // adopting it here keeps the next motion from moving everything again.
     layoutForZoneExit() {
         if (!this.dragStart || !this._dragContext) return null;
 
@@ -216,9 +214,8 @@ export const ReorderingManager = GObject.registerClass({
         const workspace = meta_window.get_workspace();
         this.dragStart = false;
 
-        // Persist chosen layout order and shape. Use the shape the layout was built from,
-        // not one re-derived from positions, since a row of unequal-height windows has
-        // differing top edges and would be misread as separate rows.
+        // Use the shape from the layout, not re-derived from positions: unequal-height windows
+        // have differing top edges and would be misread as separate rows.
         if (!skip_apply && this._chosenLayout && this._tilingManager) {
             this._tilingManager.pinComposition(workspace, this._chosenLayout.shape, this._chosenLayout.permOrder);
         }

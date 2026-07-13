@@ -25,21 +25,11 @@ import {
     MINIATURE_ANIM_KIND,
 } from './windowState.js';
 
-/**
- * Apply miniature visual state to a window actor.
- *
- * On GNOME Wayland, move_frame is ASYNC and Mutter may REJECT the target
- * position if the frame rect (original, unscaled size) would extend beyond
- * the monitor. So we cannot rely on move_frame to place the actor.
- *
- * Instead, we compute the translation from the actor's CURRENT position
- * to place the frame visual at the desired target:
- *
- *   frame_visual_x = actorX + tx + extLeft * scale = targetX
- *   tx = targetX - actorX - extLeft * scale
- *
- * This works regardless of where Mutter actually placed the actor.
- */
+// On GNOME Wayland, move_frame is ASYNC and Mutter may REJECT the target
+// position if the frame rect (original, unscaled size) would extend beyond
+// the monitor. So we cannot rely on move_frame to place the actor.
+// Instead compute translation from the actor's position to place the
+// frame visual at the desired target: tx = targetX - actorX - extLeft * scale.
 export function applyMiniatureActorState(actor, scale, extLeft, extTop, targetX, targetY) {
     const [ax, ay] = actor.get_position();
     const [actorW, actorH] = actor.get_size();
@@ -52,14 +42,8 @@ export function applyMiniatureActorState(actor, scale, extLeft, extTop, targetX,
     Logger.log(`[MINIATURE] applyMiniatureActorState: actor=( ${ax},${ay} ${actorW}x${actorH}) target=(${targetX},${targetY}) scale=${scale} tx=${tx} ty=${ty} FINAL_SIZE=${Math.round(actorW * scale)}x${Math.round(actorH * scale)}`);
 }
 
-/**
- * Animate a miniature window actor to a new target position.
- *
- * Handles three cases:
- * - create/restore animation in-flight: only update target, let onStopped settle
- * - move animation in-flight: cancel it and redirect from current visual state
- * - idle: start fresh animation from current position
- */
+// Handles three cases: create/restore in-flight (update target, let onStopped settle),
+// move in-flight (cancel + redirect from current visual), idle (fresh animation).
 export function animateMiniatureToTarget(actor, window, scale, extLeft, extTop, targetX, targetY, duration) {
     const kind = WindowState.get(window, MINIATURE_ANIM_KIND);
 
@@ -101,14 +85,8 @@ export function animateMiniatureToTarget(actor, window, scale, extLeft, extTop, 
     });
 }
 
-/**
- * Custom Clutter.Effect that enforces miniature transforms before every paint.
- *
- * Mutter may reset actor transforms internally (workspace switch animation,
- * sync_window_geometry, etc.) without emitting GObject signals. This effect
- * runs as part of the paint pipeline, guaranteeing correct transforms are
- * applied before the actor is rendered, every frame, with no race conditions.
- */
+// Mutter may reset actor transforms (workspace switch, sync_window_geometry) without
+// signals; this effect enforces miniature transforms every frame at paint time.
 const MiniatureEnforceEffect = GObject.registerClass({
     GTypeName: 'MosaicMiniatureEnforceEffect',
 }, class MiniatureEnforceEffect extends Clutter.Effect {
@@ -126,13 +104,11 @@ const MiniatureEnforceEffect = GObject.registerClass({
         }
 
         if (WindowState.get(this._window, ANIMATING_MINIATURE)) {
-            // Animation controls transforms; don't interfere
             super.vfunc_paint(...args);
             return;
         }
 
         if (WindowState.get(this._window, MINIATURE_SCREENSHOT_PAUSE)) {
-            // paused for a screenshot capture, paint at full size
             super.vfunc_paint(...args);
             return;
         }
@@ -143,7 +119,6 @@ const MiniatureEnforceEffect = GObject.registerClass({
         const tgt = WindowState.get(this._window, MINIATURE_TARGET_POS);
 
         if (sc && tgt) {
-            // Re-enforce scale and translation before this paint
             actor.set_pivot_point(0, 0);
             actor.set_scale(sc, sc);
             const [ax, ay] = actor.get_position();
@@ -155,8 +130,7 @@ const MiniatureEnforceEffect = GObject.registerClass({
     }
 });
 
-// Overlay over a miniature's visual frame area. Captures clicks and hovers to restore
-// the window, and carries the app icon that tells the miniature apart at a glance.
+// Captures clicks and hovers to restore the window; carries the app icon.
 const MiniatureClickOverlay = GObject.registerClass({
     GTypeName: 'MosaicMiniatureClickOverlay',
 }, class MiniatureClickOverlay extends Clutter.Actor {
@@ -190,17 +164,14 @@ const MiniatureClickOverlay = GObject.registerClass({
         this._iconDelayId = 0;
         this._hoverRestId = 0;
 
-        // Windows with no app associated (some dialogs, some XWayland clients)
-        // just get no icon; the overlay still works as a click target.
+        // Some dialogs/XWayland clients have no app; overlay still works as click target.
         const app = Shell.WindowTracker.get_default().get_window_app(window);
         this._icon = null;
         if (app) {
             this._icon = app.create_icon_texture(constants.MINIATURE_ICON_SIZE_PX);
-            // Same classes the Overview's WindowPreview uses, so both icons look identical.
             this._icon.add_style_class_name('window-icon');
             this._icon.add_style_class_name('icon-dropshadow');
             this._icon.set({
-                // Non-reactive so picking falls through to the overlay underneath.
                 reactive: false,
                 opacity: 0,
                 x_align: Clutter.ActorAlign.CENTER,
@@ -209,11 +180,8 @@ const MiniatureClickOverlay = GObject.registerClass({
             this.add_child(this._icon);
         }
 
-        // Mirror the window actor's visibility. Mutter sets the window actor
-        // invisible when the user is on a different workspace; without this
-        // binding the reactive overlay would keep being pickable on every
-        // workspace at the same screen position where the miniature lives on
-        // its own workspace, restoring it on stray clicks.
+        // Mirror window actor visibility so the reactive overlay isn't pickable
+        // from other workspaces at the same screen position.
         const windowActor = window.get_compositor_private();
         if (windowActor) {
             windowActor.bind_property('visible',
@@ -275,10 +243,6 @@ const MiniatureClickOverlay = GObject.registerClass({
         this._hoverRestId = 0;
     }
 
-    /**
-     * Update overlay position/size when the miniature's target changes
-     * (e.g., layout recomputation).
-     */
     updatePosition() {
         if (this._destroyed) return;
         const tgt = WindowState.get(this._window, MINIATURE_TARGET_POS);
@@ -312,7 +276,6 @@ const MiniatureClickOverlay = GObject.registerClass({
     showIcon(duration) {
         if (this._destroyed || !this._icon) return;
         if (this._iconSuppressReasons.size > 0) return;
-        // Only the opacity one, since the fade can start while the icon is still flying in.
         this._icon.remove_transition('opacity');
         if (duration <= 0) {
             this._icon.opacity = 255;
@@ -325,14 +288,11 @@ const MiniatureClickOverlay = GObject.registerClass({
         });
     }
 
-    // The window's visual center is an affine combination of the scale and translation
-    // its ease animates, so matching that duration and mode traces the center exactly.
     flyIconIn(dx, dy, duration) {
         if (this._destroyed || !this._icon) return;
         this._cancelIconDelay();
         this._icon.remove_all_transitions();
 
-        // Animations off zeroes every duration, so there's no flight to ride.
         if (duration <= 0) {
             this._icon.set_translation(0, 0, 0);
             this.showIcon(0);
@@ -348,7 +308,6 @@ const MiniatureClickOverlay = GObject.registerClass({
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
 
-        // Fade over what's left of the flight, so the icon is solid the moment it lands.
         const fadeDelay = Math.round(duration * constants.MINIATURE_ICON_FADE_START);
         this._iconDelayId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, fadeDelay, () => {
             this._iconDelayId = 0;
@@ -363,8 +322,6 @@ const MiniatureClickOverlay = GObject.registerClass({
         this._iconDelayId = 0;
     }
 
-    // Aborts a flight in progress too, otherwise unsuppressing would light the icon
-    // up wherever the ease had left it.
     hideIcon() {
         if (this._destroyed || !this._icon) return;
         this._cancelIconDelay();
@@ -373,8 +330,7 @@ const MiniatureClickOverlay = GObject.registerClass({
         this._icon.opacity = 0;
     }
 
-    // Overview and the screenshot UI can both want the icon gone at once, so
-    // track who asked instead of a single flag.
+    // Track who asked instead of a single flag (overview + screenshot can both want it gone).
     setIconSuppressed(reason, suppressed) {
         if (suppressed) this._iconSuppressReasons.add(reason);
         else this._iconSuppressReasons.delete(reason);
@@ -383,7 +339,6 @@ const MiniatureClickOverlay = GObject.registerClass({
         else this.showIcon(0);
     }
 
-    // Non-reactive while it fades, since the window growing back underneath owns the clicks now.
     fadeOutAndDestroy(duration) {
         if (this._destroyed) return;
         this.reactive = false;
@@ -447,9 +402,6 @@ export const MiniatureManager = GObject.registerClass({
         const windowActor = window.get_compositor_private();
         if (!windowActor) return false;
 
-        // animateWindow's onStopped(false) leaves the window in AnimationsManager's tracking,
-        // expecting a new animateWindow call to clean up. A miniature ease takes over
-        // instead, so nothing else would, and 'animations-completed' would never fire again.
         this._animationsManager?.removeAnimatingWindow(window.get_id());
 
         const preSize = forcedPreSize || window.get_frame_rect();
@@ -462,16 +414,14 @@ export const MiniatureManager = GObject.registerClass({
         const [actorBefore_x, actorBefore_y] = windowActor.get_position();
         const currentFrame = window.get_frame_rect();
 
-        // Buffer rect vs frame rect is a stable border offset; the actor's live position
-        // isn't. After back-to-back move_resize_frame calls (e.g. a restore cascade
-        // re-miniaturizing siblings) the compositor lags, baking that stale gap into extLeft/extTop.
+        // buffer rect vs frame rect is stable; actor position isn't. After back-to-back
+        // move_resize_frame the compositor lags, baking stale gap into extLeft/extTop.
         const bufferRect = window.get_buffer_rect();
         const extLeft = currentFrame.x - bufferRect.x;
         const extTop = currentFrame.y - bufferRect.y;
         Logger.log(`[MINIATURE] createMiniature ${window.get_id()} (${window.get_wm_class?.() ?? '?'}): preFrame=(${preSize.x},${preSize.y} ${preSize.width}x${preSize.height}) slot=${Math.round(preSize.width * scale)}x${Math.round(preSize.height * scale)} currentFrame=(${currentFrame.x},${currentFrame.y} ${currentFrame.width}x${currentFrame.height}) actorBefore=(${actorBefore_x},${actorBefore_y}) target=(${targetX},${targetY}) scale=${scale.toFixed(4)} extLeft=${extLeft} extTop=${extTop}`);
 
-        // Store state BEFORE animation. Enforce effect and workspace animation
-        // patch need to read these during the animation
+        // Store before animation; enforce effect + workspace patch read these during anim.
         WindowState.set(window, IS_MINIATURE, true);
         WindowState.set(window, MINIATURE_SCALE, scale);
         WindowState.set(window, PRE_MINIATURE_SIZE, { width: preSize.width, height: preSize.height });
@@ -479,20 +429,17 @@ export const MiniatureManager = GObject.registerClass({
         WindowState.set(window, MINIATURE_EXT_LEFT, extLeft);
         WindowState.set(window, MINIATURE_EXT_TOP, extTop);
 
-        // A swap can grab a window still fading in; finish the entrance fade
-        // here so the mini doesn't render half-transparent (or vanish) mid-fade.
+        // Finish entrance fade so mini doesn't render half-transparent mid-fade.
         if (WindowState.get(window, 'pendingFirstPlacement')) {
             WindowState.remove(window, 'pendingFirstPlacement');
             windowActor.remove_transition('opacity');
             windowActor.opacity = 255;
         }
 
-        // Add the enforce effect (guard will skip during animation)
         const enforceEffect = new MiniatureEnforceEffect(window);
         windowActor.add_effect(enforceEffect);
 
-        // Where the icon has to end up: the overlay's own center, which BinLayout
-        // gives it for free once the flight's translation reaches zero.
+        // BinLayout gives icon center for free once flight translation reaches zero.
         const endCenterX = targetX + preSize.width * scale / 2;
         const endCenterY = targetY + preSize.height * scale / 2;
         let iconFlyDx = 0;
@@ -615,7 +562,7 @@ export const MiniatureManager = GObject.registerClass({
 
         Logger.log(`[MINIATURE] createMiniature ${window.get_id()}: miniSize=${Math.round(preSize.width * scale)}x${Math.round(preSize.height * scale)}`);
 
-        // Only set the focus-restore guard when a registry can expire it, since a stuck flag blocks restore forever.
+        // Guard blocks restore forever if registry can't expire it.
         if (this._timeoutRegistry) {
             WindowState.set(window, 'justMiniaturized', true);
             const timeoutId = this._timeoutRegistry.add(constants.MINIATURE_FOCUS_GUARD_MS, () => {
@@ -629,13 +576,11 @@ export const MiniatureManager = GObject.registerClass({
         this._miniatureWindows.set(window.get_id(), window);
         this.emit('miniature-created', window);
 
-        // Add click-capture overlay above the miniature
         const overlay = new MiniatureClickOverlay(window, this);
         global.window_group.insert_child_above(overlay, windowActor);
         WindowState.set(window, MINIATURE_OVERLAY, overlay);
 
-        // The window's ease is already a few lines old by now, but it runs on the same
-        // frame clock, so the icon still lands with it.
+        // Ease is already running on the same frame clock; icon still lands with it.
         overlay.flyIconIn(iconFlyDx, iconFlyDy, animate ? iconFlyDuration : 0);
         if (this._overviewActive) overlay.setIconSuppressed('overview', true);
 
@@ -656,18 +601,15 @@ export const MiniatureManager = GObject.registerClass({
 
         Logger.log(`[MINIATURE] restoreMiniature START ${window.get_id()} (${window.get_wm_class?.() ?? '?'}): frame=(${frame.x},${frame.y} ${frame.width}x${frame.height}) scale=${sc.toFixed(4)}`);
 
-        // Remove IS_MINIATURE first so enforce effect stops
         WindowState.remove(window, IS_MINIATURE);
 
-        // Drop it from state first: tiling.js's animateToPosition calls must stop
-        // finding it while the icon fades out on its own.
+        // Drop from state first so tiling stops finding it during icon fade-out.
         const overlay = WindowState.get(window, MINIATURE_OVERLAY);
         if (overlay) {
             WindowState.remove(window, MINIATURE_OVERLAY);
             overlay.fadeOutAndDestroy(Math.ceil(constants.MINIATURE_ICON_FADE_OUT_MS * getSlowDownFactor()));
         }
 
-        // Remove the enforce effect
         if (windowActor) {
             const effects = windowActor.get_effects();
             for (const effect of effects) {
@@ -709,9 +651,8 @@ export const MiniatureManager = GObject.registerClass({
                 duration = Math.ceil(constants.MINIATURE_ANIM_MS * getSlowDownFactor());
             }
 
-            // Set kind after remove_all_transitions: create's onStopped fires synchronously during
-            // that call and unconditionally removes MINIATURE_ANIM_KIND, so setting before would
-            // be overwritten. Setting after is safe because onStopped has already run by this point.
+            // Set after remove_all_transitions: create's onStopped fires synchronously and removes
+            // MINIATURE_ANIM_KIND, so setting before would be overwritten.
             windowActor.remove_all_transitions();
             WindowState.set(window, MINIATURE_ANIM_KIND, 'restore');
 
@@ -719,7 +660,6 @@ export const MiniatureManager = GObject.registerClass({
             windowActor.set_scale(startScale, startScale);
             windowActor.set_translation(startTx, startTy, 0);
 
-            // Activate before ease so the window gains focus at animation start, not after.
             if (activate) window.activate(global.get_current_time());
 
             // A retile can interrupt this mid-flight (it shares the actor with
@@ -769,8 +709,7 @@ export const MiniatureManager = GObject.registerClass({
             });
         }
 
-        // Snapshot the slot center before the fields below get cleared, so the
-        // layout scorer can pull the restored window back near where it sat.
+        // Snapshot before clearing; layout scorer uses this to pull window back near its slot.
         const anchorPre = WindowState.get(window, PRE_MINIATURE_SIZE);
         if (tgt && anchorPre) {
             const cx = tgt.x + (anchorPre.width * sc) / 2;
@@ -779,14 +718,13 @@ export const MiniatureManager = GObject.registerClass({
             Logger.log(`[RESTORE ANCHOR] ${window.get_id()}: slot center (${cx.toFixed(0)},${cy.toFixed(0)})`);
         }
 
-        // Clear remaining WindowState
         WindowState.remove(window, MINIATURE_SCALE);
         WindowState.remove(window, PRE_MINIATURE_SIZE);
         WindowState.remove(window, MINIATURE_TARGET_POS);
         WindowState.remove(window, MINIATURE_EXT_LEFT);
         WindowState.remove(window, MINIATURE_EXT_TOP);
-        // Stale mini-target persists when a window's min size prevents tryFitWithResize
-        // from rewriting it; without clearing, the next layout uses the obsolete mini size.
+        // Stale mini-target persists when min size blocks tryFitWithResize; clear so next layout
+        // doesn't use obsolete mini size.
         WindowState.remove(window, 'targetSmartResizeSize');
 
         const timeoutId = WindowState.get(window, 'miniatureJustMiniaturizedTimeoutId');
@@ -804,7 +742,6 @@ export const MiniatureManager = GObject.registerClass({
     destroyMiniature(window) {
         const windowActor = window.get_compositor_private();
 
-        // Remove IS_MINIATURE first so enforce effect stops
         WindowState.remove(window, IS_MINIATURE);
         WindowState.remove(window, MINIATURE_SCALE);
         WindowState.remove(window, PRE_MINIATURE_SIZE);
@@ -812,7 +749,7 @@ export const MiniatureManager = GObject.registerClass({
         WindowState.remove(window, MINIATURE_EXT_LEFT);
         WindowState.remove(window, MINIATURE_EXT_TOP);
 
-        // Destroy the click overlay, since an orphaned reactive actor would capture clicks on a dead window.
+        // Orphaned reactive actor would capture clicks on a dead window.
         const overlay = WindowState.get(window, MINIATURE_OVERLAY);
         if (overlay) {
             overlay.destroy();
@@ -838,9 +775,7 @@ export const MiniatureManager = GObject.registerClass({
         Logger.log(`[MINIATURE] Destroyed miniature ${window.get_id()} (window closed)`);
     }
 
-    // Mutter restacks window actors on its own and never touches our overlays, so a
-    // raised or dragged window would slide underneath a miniature's icon. Pin each
-    // overlay back onto its own actor whenever the stack moves.
+    // Mutter restacks window actors but not our overlays, so pin each back when stack moves.
     syncOverlayStacking() {
         for (const window of this._miniatureWindows.values()) {
             const overlay = WindowState.get(window, MINIATURE_OVERLAY);
@@ -851,16 +786,12 @@ export const MiniatureManager = GObject.registerClass({
         }
     }
 
-    // Session icon steps aside so the WindowPreview's own icon can take over at
-    // the exact same coordinates; no crossfade, no two icons on screen.
     setOverviewActive(active) {
         this._overviewActive = active;
         for (const window of this._miniatureWindows.values())
             WindowState.get(window, MINIATURE_OVERLAY)?.setIconSuppressed('overview', active);
     }
 
-    // Hard-restore every miniature back to full size. Used by disable() to
-    // leave a clean slate, since the next enable() rebuilds via enforceWorkspaceFit.
     restoreAllMiniatures() {
         const windows = global.display.get_tab_list(Meta.TabList.NORMAL, null)
             .filter(w => WindowState.get(w, IS_MINIATURE));
@@ -877,9 +808,7 @@ export const MiniatureManager = GObject.registerClass({
         }
     }
 
-    // Screenshot UI grabs the actor straight off the stage, so a miniature would
-    // get captured shrunk and in the wrong spot. Snap it back to full size here,
-    // resumeFromScreenshot() puts it back once the capture is done.
+    // Screenshot grabs actor straight off stage; snap miniature back to full size first.
     pauseForScreenshot() {
         const windows = global.display.get_tab_list(Meta.TabList.NORMAL, null)
             .filter(w => WindowState.get(w, IS_MINIATURE));
@@ -887,9 +816,6 @@ export const MiniatureManager = GObject.registerClass({
             const actor = window.get_compositor_private();
             if (!actor) continue;
             WindowState.set(window, MINIATURE_SCREENSHOT_PAUSE, true);
-            // Actor goes back to full size here, but the overlay stays on the small
-            // rect. An icon left visible would land in the capture, floating over
-            // a full-size window.
             WindowState.get(window, MINIATURE_OVERLAY)?.setIconSuppressed('screenshot', true);
             actor.set_pivot_point(0, 0);
             actor.set_scale(1, 1);

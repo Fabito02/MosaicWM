@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Shared constants for the extension
 
-export const WINDOW_SPACING = 8; // Pixels
+export const WINDOW_SPACING = 8;
 
 // Cap on distinct drag candidates kept after de-duplication so the live nearest search
 // stays cheap. A safety net that keeps the current layout, so it never drops a reachable one.
@@ -37,7 +37,6 @@ export const ABSOLUTE_MIN_HEIGHT = 100;
 
 export const EDGE_TILING_THRESHOLD = 10;
 
-// Timing constants
 export const POLL_INTERVAL_MS = 50;
 export const DEBOUNCE_DELAY_MS = 500;
 export const RETILE_DELAY_MS = 100;
@@ -70,13 +69,11 @@ export const EASE_TARGET_TOLERANCE_PX = 2;
 export const SMART_RESIZE_MIN_WINDOW_WIDTH = 100;
 export const SMART_RESIZE_MIN_WINDOW_HEIGHT = 100;
 
-// Slide-in animation for new windows
 export const SLIDE_IN_OFFSET_PX = 100;
 export const SLIDE_IN_DURATION_MS = 300;
 export const SLIDE_IN_FAILSAFE_MS = 1000;     // Re-check interval if a window's entrance never gets claimed
 export const QUEUE_PROCESS_DELAY_MS = 100;   // Delay between processing window opening queue items (Mutter settling)
 
-// Miniature windows
 export const MINIATURE_TARGET_SIZE_PX = 256;  // Longest side of a miniaturized window
 export const MINIATURE_ICON_SIZE_PX = 64;     // Same size the Overview uses, so the icon can hand off without resizing
 export const MINIATURE_ICON_FADE_START = 0.5;  // Point in the icon's flight where it starts fading in; a fraction since an interrupted restore shortens the flight

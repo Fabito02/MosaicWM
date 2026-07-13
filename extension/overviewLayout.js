@@ -24,7 +24,7 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
             return [];
         }
 
-        // Filter out attached dialogs and transient children (visually merged with parent window)
+
         const filteredClones = clones.filter(clone => {
             const metaWindow = clone.metaWindow || clone.source?.metaWindow;
             if (!metaWindow) return true;
@@ -36,7 +36,6 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
         if (filteredClones.length === 0)
             return [];
 
-        // Determine workspace
         let workspace = null;
         for (const clone of filteredClones) {
             const mw = clone.metaWindow || clone.source?.metaWindow;
@@ -48,7 +47,6 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
 
         if (!workspace) return [];
 
-        // --- VIEWPORT MIRROR ---
         const monitor = this.monitor || this._monitor;
         const monitorIndex = monitor ? monitor.index : global.display.get_primary_monitor();
         const workArea = workspace.get_work_area_for_monitor(monitorIndex);
@@ -57,10 +55,9 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
             return [];
         }
 
-        // Calculate uniform scale to fit workArea into area (letterboxing)
+
         const scale = Math.min(area.width / workArea.width, area.height / workArea.height, 1.0);
 
-        // Center the "mirrored" desktop
         const offsetX = (area.width - (workArea.width * scale)) / 2;
         const offsetY = (area.height - (workArea.height * scale)) / 2;
 
@@ -69,14 +66,11 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
             const mw = clone.metaWindow || clone.source?.metaWindow;
             if (!mw) continue;
 
-            // Map absolute screen coordinates to the Overview slot
-            // Primary: Mosaic Cache (stable positions)
-            // Secondary Fallback: Real Window Frame (ensures visibility if cache is missing)
+
             const rect = ComputedLayouts.get(mw) || mw.get_frame_rect();
             if (!rect) continue;
 
-            // Formula: (DesktopPos - DesktopOrigin) * Scale + OverviewSlotOrigin + CenteringOffset
-            // Half-gap inset on each side → full WINDOW_SPACING between adjacent thumbnails
+
             const gap = WINDOW_SPACING / 2;
             const x = (rect.x - workArea.x) * scale + area.x + offsetX + gap;
             const y = (rect.y - workArea.y) * scale + area.y + offsetY + gap;

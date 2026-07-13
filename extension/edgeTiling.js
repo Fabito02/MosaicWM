@@ -21,7 +21,6 @@ export const EdgeTilingManager = GObject.registerClass({
 }, class EdgeTilingManager extends GObject.Object {
     _init() {
         super._init();
-        // Module state for edge tiling activity
         this._isEdgeTilingActive = false;
         this._activeEdgeTilingWindow = null;
         this._isResizing = false;
@@ -77,7 +76,6 @@ export const EdgeTilingManager = GObject.registerClass({
         this._activeEdgeTilingWindow = null;
     }
 
-    // Cleanup resources
     destroy() {
         this.clearAllStates();
         this._animationsManager = null;
@@ -87,7 +85,6 @@ export const EdgeTilingManager = GObject.registerClass({
         this._timeoutRegistry = null;
     }
 
-    // Check for edge-tiled windows on a specific side
     // cachedEdgeTiledIds is ignored in WeakMap implementation
     _hasEdgeTiledWindowsOnSide(workspace, side, _cachedEdgeTiledIds = null) {
         if (!workspace) return false;
@@ -151,7 +148,6 @@ export const EdgeTilingManager = GObject.registerClass({
         return TileZone.NONE;
     }
 
-    // Get width of existing tile on the same side
     _getExistingSideWidth(workspace, monitor, side) {
         if (!workspace || monitor === undefined) return null;
 
@@ -190,7 +186,6 @@ export const EdgeTilingManager = GObject.registerClass({
         return null;
     }
 
-    // Get height of existing quarter tile window
     _getExistingQuarterHeight(workspace, monitor, zone) {
         if (!workspace || monitor === undefined) return null;
 
@@ -615,7 +610,6 @@ export const EdgeTilingManager = GObject.registerClass({
         }
     }
 
-    // Helpers for clearWindowState
     _isQuarterZone(zone) {
         return zone === TileZone.TOP_LEFT || zone === TileZone.BOTTOM_LEFT ||
                zone === TileZone.TOP_RIGHT || zone === TileZone.BOTTOM_RIGHT;
@@ -664,7 +658,6 @@ export const EdgeTilingManager = GObject.registerClass({
         this._miniatureManager = miniatureManager;
     }
 
-    // Check if window can be resized to target dimensions
     _canResize(window, _targetWidth, _targetHeight) {
         if (window.window_type !== 0) { // Meta.WindowType.NORMAL
             Logger.log(`Window type ${window.window_type} is not suitable for edge tiling`);

@@ -12,7 +12,6 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import * as Logger from './logger.js';
 
-// Helper to get GIcon for custom icons
 let _iconPath = null;
 function _getIcon(extension, iconName) {
     if (!_iconPath) {
@@ -22,7 +21,6 @@ function _getIcon(extension, iconName) {
     return new Gio.FileIcon({ file: iconFile });
 }
 
-// MosaicMenuToggle - Quick Settings toggle with per-workspace menu
 const MosaicMenuToggle = GObject.registerClass(
     class MosaicMenuToggle extends QuickSettings.QuickMenuToggle {
         constructor(extension) {
@@ -41,20 +39,16 @@ const MosaicMenuToggle = GObject.registerClass(
                 this._onGlobalToggle();
             });
 
-            // Build the menu header
             this.menu.setHeader(_getIcon(extension, 'mosaic-on-symbolic'), 'Mosaic WM');
 
-            // Workspaces section
             this._workspacesSection = new PopupMenu.PopupMenuSection();
             this.menu.addMenuItem(this._workspacesSection);
 
-            // Connect to workspace signals
             this._workspaceManager = global.workspace_manager;
             this._wsAddedId = this._workspaceManager.connect('workspace-added', () => this._rebuildWorkspaceList());
             this._wsRemovedId = this._workspaceManager.connect('workspace-removed', () => this._rebuildWorkspaceList());
             this._wsSwitchedId = this._workspaceManager.connect('active-workspace-changed', () => this._updateCurrentWorkspaceHighlight());
 
-            // Build initial workspace list (after _workspaceManager is set)
             this._rebuildWorkspaceList();
         }
 
@@ -66,8 +60,7 @@ const MosaicMenuToggle = GObject.registerClass(
             this.gicon = _getIcon(this._extension, enabled ? 'mosaic-on-symbolic' : 'mosaic-off-symbolic');
 
             if (enabled) {
-            // Enable mosaic on all workspaces
-            // For WeakMap, we iterate all workspaces and ensure they are NOT in the map (or false)
+            // For WeakMap, iterate all workspaces and ensure they are NOT in the map (or false)
                 for (let i = 0; i < nWorkspaces; i++) {
                     const workspace = this._workspaceManager.get_workspace_by_index(i);
                     if (workspace) {
@@ -75,7 +68,6 @@ const MosaicMenuToggle = GObject.registerClass(
                     }
                 }
 
-                // Re-tile all workspaces (monitor detection is automatic)
                 for (let i = 0; i < nWorkspaces; i++) {
                     const workspace = this._workspaceManager.get_workspace_by_index(i);
                     if (workspace) {
@@ -86,7 +78,6 @@ const MosaicMenuToggle = GObject.registerClass(
                     }
                 }
             } else {
-            // Disable mosaic on all workspaces
                 for (let i = 0; i < nWorkspaces; i++) {
                     const workspace = this._workspaceManager.get_workspace_by_index(i);
                     if (workspace) {
@@ -124,7 +115,6 @@ const MosaicMenuToggle = GObject.registerClass(
                 });
                 icon.visible = isActive;
 
-                // Insert after label (label is usually index 1 after ornament)
                 item.insert_child_at_index(icon, 2);
                 item._locationIcon = icon;
 
@@ -137,7 +127,6 @@ const MosaicMenuToggle = GObject.registerClass(
                 this._workspaceItems.push(item);
             }
 
-            // Update global toggle state based on workspace states
             this._updateGlobalToggleState();
         }
 
@@ -154,7 +143,6 @@ const MosaicMenuToggle = GObject.registerClass(
                 }
             }
 
-            // Update indicator icon for current workspace
             this._extension._updateIndicatorIcon();
         }
 
@@ -186,7 +174,6 @@ const MosaicMenuToggle = GObject.registerClass(
         }
 
         _updateGlobalToggleState() {
-        // Global toggle is ON if any workspace has mosaic enabled
             const nWorkspaces = this._workspaceManager.get_n_workspaces();
             let anyEnabled = false;
 
@@ -220,7 +207,6 @@ const MosaicMenuToggle = GObject.registerClass(
         }
     });
 
-// MosaicIndicator - System indicator with icon in top bar
 export const MosaicIndicator = GObject.registerClass(
     class MosaicIndicator extends QuickSettings.SystemIndicator {
         constructor(extension) {
@@ -228,16 +214,13 @@ export const MosaicIndicator = GObject.registerClass(
 
             this._extension = extension;
 
-            // Create the indicator icon
             this._indicator = this._addIndicator();
             this._indicator.gicon = _getIcon(extension, 'mosaic-on-symbolic');
             this._indicator.visible = true;
 
-            // Create the toggle menu
             this._toggle = new MosaicMenuToggle(extension);
             this.quickSettingsItems.push(this._toggle);
 
-            // Connect to workspace switch to update icon
             this._workspaceManager = global.workspace_manager;
             this._wsSwitchedId = this._workspaceManager.connect('active-workspace-changed', () => {
                 this._updateIcon();

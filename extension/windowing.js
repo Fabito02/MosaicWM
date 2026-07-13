@@ -70,7 +70,6 @@ export const WindowingManager = GObject.registerClass({
         return this.getMonitorWorkspaceWindows(this.getWorkspace(), monitor, allow_unrelated);
     }
 
-    // Call this at start of tiling operations to invalidate cache
     invalidateWindowsCache() {
         this._cacheVersion = (this._cacheVersion || 0) + 1;
     }
@@ -100,7 +99,6 @@ export const WindowingManager = GObject.registerClass({
         return _windows;
     }
 
-    // Attempts to tile a window with an existing edge-tiled window
     tryTileWithSnappedWindow(window, edgeTiledWindow, previousWorkspace) {
         if (!this._edgeTilingManager) {
             Logger.error('tryTileWithSnappedWindow: edgeTilingManager not set');
@@ -180,7 +178,6 @@ export const WindowingManager = GObject.registerClass({
         }
     }
 
-    // Helper to create or reuse an adjacent workspace cleanly
     createOrReuseAdjacentWorkspace(originWorkspace) {
         const workspaceManager = global.workspace_manager;
         const currentIndex = originWorkspace.index();
@@ -201,8 +198,6 @@ export const WindowingManager = GObject.registerClass({
         return targetWorkspace;
     }
 
-    // Moves a window that doesn't fit into another workspace.
-    // Returns a Promise that resolves with the target_workspace when the move and retiling are complete.
     moveOversizedWindow(window, options = { switchFocus: true }) {
         return new Promise(resolve => {
             const workspaceManager = global.workspace_manager;
@@ -405,7 +400,6 @@ export const WindowingManager = GObject.registerClass({
         return window.is_maximized() || window.is_fullscreen();
     }
 
-    // Checks if a workspace on a specific monitor contains any sacred windows.
     hasSacredWindow(workspace, monitor, excludeWindowId = null) {
         if (!workspace || monitor === null || monitor === undefined)
             return false;
@@ -417,7 +411,6 @@ export const WindowingManager = GObject.registerClass({
         );
     }
 
-    // Navigates to an appropriate workspace when current becomes empty.
     renavigate(workspace, condition, lastVisitedIndex = null, monitorIndex = -1) {
         if (!condition) return;
 

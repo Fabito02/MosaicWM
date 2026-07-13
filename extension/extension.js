@@ -63,7 +63,6 @@ export default class WindowMosaicExtension extends Extension {
         this.animationsManager = null;
         this.windowingManager = null;
 
-        // Handler classes
         this.windowHandler = null;
         this.dragHandler = null;
         this.resizeHandler = null;
@@ -84,16 +83,13 @@ export default class WindowMosaicExtension extends Extension {
 
         this._injectionManager = null;
 
-        // Centralized timeout management for async operations
-        this._timeoutRegistry = null; // created in enable()
+        this._timeoutRegistry = null;
 
-        // Per-workspace toggle for mosaic behavior.
         this._disabledWorkspaceStates = new WeakMap();
     }
 
     isMosaicEnabledForWorkspace(workspace) {
         if (!workspace) return true;
-        // If explicitly set to true in WeakMap, it is disabled. Otherwise enabled.
         return !this._disabledWorkspaceStates.get(workspace);
     }
 
@@ -145,10 +141,6 @@ export default class WindowMosaicExtension extends Extension {
                 this.tilingManager.enforceWorkspaceFit(workspace, j);
         }
     };
-
-    // =========================================================================
-    // SIGNAL HANDLERS: Workspace Changes
-    // =========================================================================
 
     _workspaceSwitchedHandler = () => {
         const newWorkspace = this._workspaceManager.get_active_workspace();
@@ -205,7 +197,6 @@ export default class WindowMosaicExtension extends Extension {
         // legitimately disabled attach-modal-dialogs.
         this._mutterSettings = new Gio.Settings({ schema_id: 'org.gnome.mutter' });
 
-        // Create managers
         this.edgeTilingManager = new EdgeTilingManager();
         this.tilingManager = new TilingManager();
         this.tilingManager.setExtension(this);
@@ -215,7 +206,6 @@ export default class WindowMosaicExtension extends Extension {
         this.animationsManager = new AnimationsManager();
         this.windowingManager = new WindowingManager();
 
-        // Wire up dependencies
         this.windowingManager.setEdgeTilingManager(this.edgeTilingManager);
         this.windowingManager.setAnimationsManager(this.animationsManager);
         this.windowingManager.setTilingManager(this.tilingManager);
@@ -246,7 +236,6 @@ export default class WindowMosaicExtension extends Extension {
         this.edgeTilingManager.setWindowingManager(this.windowingManager);
         this.animationsManager.setTimeoutRegistry(this._timeoutRegistry);
 
-        // Create handler classes (receive extension reference)
         this.windowHandler = new WindowHandler(this);
         this.dragHandler = new DragHandler(this);
         this.resizeHandler = new ResizeHandler(this);
@@ -279,7 +268,6 @@ export default class WindowMosaicExtension extends Extension {
             this._dndLeaveId = this._dnd.connect('dnd-leave', this._onDndLeave.bind(this));
         }
 
-        // Initialize Quick Settings indicator
         this._mosaicIndicator = new MosaicIndicator(this);
         Main.panel.statusArea.quickSettings.addExternalIndicator(this._mosaicIndicator);
 
@@ -540,7 +528,6 @@ export default class WindowMosaicExtension extends Extension {
                     }
                 }
 
-                // Literal Fallback: use native GNOME strategy if not strictly mosaic
                 if (!useMosaic) {
                     if (isEnabled) {
                         Logger.log('Overview: Fallback to NATIVE (floating window detected)');
@@ -614,7 +601,6 @@ export default class WindowMosaicExtension extends Extension {
             const workspace = this._workspaceManager.get_workspace_by_index(i);
             const windows = workspace.list_windows();
             for (const window of windows) {
-                // Initialize preferredSize if not set (for veteran windows)
                 if (this.windowingManager.isRelated(window)) {
                     this.tilingManager.savePreferredSize(window);
                 }
@@ -703,6 +689,7 @@ export default class WindowMosaicExtension extends Extension {
                 w.get_id() !== window.get_id() &&
                 !this.edgeTilingManager.isEdgeTiled(w) &&
                 !WindowState.get(w, 'pendingInQueue') &&
+                !this.windowingManager.isExcluded(w) &&
                 !this.windowingManager.isMaximizedOrFullscreen(w)
             );
 
@@ -867,7 +854,6 @@ export default class WindowMosaicExtension extends Extension {
     disable() {
         Logger.log('Disabling extension');
 
-        // Clear all managed timeouts first
         if (this._timeoutRegistry) {
             this._timeoutRegistry.clearAll();
         }
@@ -884,13 +870,11 @@ export default class WindowMosaicExtension extends Extension {
             this._injectionManager = null;
         }
 
-        // Restore MonitorGroup._init prototype patch
         if (this._origMonitorGroupInit) {
             WorkspaceAnimation.MonitorGroup.prototype._init = this._origMonitorGroupInit;
             this._origMonitorGroupInit = null;
         }
 
-        // Restore WindowPreview.boundingBox prototype patch
         if (this._origWindowPreviewBoundingBoxDesc) {
             Object.defineProperty(
                 WindowPreviewModule.WindowPreview.prototype,
@@ -915,7 +899,6 @@ export default class WindowMosaicExtension extends Extension {
         if (this.drawingManager) this.drawingManager.destroy();
         if (this.animationsManager) this.animationsManager.destroy();
 
-        // Destroy Quick Settings indicator
         if (this._mosaicIndicator) {
             this._mosaicIndicator.destroy();
             this._mosaicIndicator = null;
@@ -980,7 +963,6 @@ export default class WindowMosaicExtension extends Extension {
             this._onOverviewHiddenId = 0;
         }
 
-        // Cleanup handled by WindowHandler and WindowState
         const allWindows = global.display.get_tab_list(Meta.TabList.NORMAL, null);
         allWindows.forEach(w => {
             if (this.windowHandler) this.windowHandler.disconnectWindowSignals(w);
@@ -1000,7 +982,6 @@ export default class WindowMosaicExtension extends Extension {
         this.dragHandler = null;
         this.resizeHandler = null;
 
-        // Clean up managers (if they had cleanup methods)
         if (this.tilingManager) this.tilingManager.destroy();
         if (this.reorderingManager) this.reorderingManager.destroy();
         if (this.swappingManager) this.swappingManager.destroy();
