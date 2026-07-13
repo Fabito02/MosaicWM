@@ -59,6 +59,17 @@ body:
       placeholder: Paste logs here
 
   - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: |
+        Which commit are you running? Run this inside the repository directory:
+        `git log -1 --format='%h %s'`
+      placeholder: "7612d6f fix(edge-tiling): grow the miniature straight into its zone"
+    validations:
+      required: true
+
+  - type: input
     id: gnome-version
     attributes:
       label: GNOME Version
