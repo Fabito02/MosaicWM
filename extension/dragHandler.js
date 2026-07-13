@@ -340,84 +340,86 @@ export const DragHandler = GObject.registerClass({
         this._isPositionProcessing = true;
 
         this._timeoutRegistry.addIdle(() => {
-            if (!this._draggedWindow) {
-                this._isPositionProcessing = false;
-                return GLib.SOURCE_REMOVE;
-            }
+            // finally, not a trailing assignment: anything throwing below would leave the flag set
+            // and every later position idle would bail at the guard, killing the drag for good.
+            try {
+                if (!this._draggedWindow) return GLib.SOURCE_REMOVE;
 
-            if (zone !== TileZone.NONE && zone !== this._currentZone) {
-                Logger.log(`Edge tiling: detected zone ${zone}`);
-                this._currentZone = zone;
+                if (zone !== TileZone.NONE && zone !== this._currentZone) {
+                    Logger.log(`Edge tiling: detected zone ${zone}`);
+                    this._currentZone = zone;
 
-                if (this._lastReorderMonitor !== null && monitor !== this._lastReorderMonitor) {
+                    if (this._lastReorderMonitor !== null && monitor !== this._lastReorderMonitor) {
+                        this.tilingManager.setDragRemainingSpace(null);
+                        this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, this._lastReorderMonitor, false, true);
+                    }
+                    this._lastReorderMonitor = monitor;
+                    this.edgeTilingManager.setEdgeTilingActive(true, this._draggedWindow);
+                    this.drawingManager.showTilePreview(zone, workArea, this._draggedWindow);
+
+                    const remainingSpace = this.edgeTilingManager.calculateRemainingSpaceForZone(zone, workArea);
+                    this.tilingManager.setDragRemainingSpace(remainingSpace);
+
+                    this.clearGhostWindows();
+
+                    const mosaicWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor)
+                        .filter(w => w.get_id() !== this._draggedWindow.get_id() &&
+                                     !this.edgeTilingManager.isEdgeTiled(w));
+
+                    // A lone window that can fill the opposite half gets auto-tiled there on drop, so it
+                    // gets its own tile preview. Miniaturizing it here would preview something that won't happen.
+                    const pairsIntoOppositeHalf =
+                        mosaicWindows.length === 1 &&
+                        (zone === TileZone.LEFT_FULL || zone === TileZone.RIGHT_FULL) &&
+                        this.edgeTilingManager.isEdgeTileable(mosaicWindows[0], remainingSpace);
+
+                    // Decided before tiling, since the tile pass is what miniaturizes now.
+                    this.tilingManager.setDragMiniaturizationAllowed(!pairsIntoOppositeHalf);
+                    this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, monitor, false);
+
+                    this.drawingManager.hideCompanionTilePreview();
+
+                    if (pairsIntoOppositeHalf) {
+                        Logger.log(`Edge tiling: previewing ${mosaicWindows[0].get_id()} as opposite half ${remainingSpace.width}x${remainingSpace.height}`);
+                        this.drawingManager.showCompanionTilePreview(remainingSpace);
+                    }
+                } else if (zone === TileZone.NONE && this._currentZone !== TileZone.NONE) {
+                    Logger.log('Edge tiling: exiting zone');
+                    this._currentZone = TileZone.NONE;
+                    this.edgeTilingManager.setEdgeTilingActive(false, null);
+                    this.drawingManager.hideTilePreview();
                     this.tilingManager.setDragRemainingSpace(null);
-                    this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, this._lastReorderMonitor, false, true);
-                }
-                this._lastReorderMonitor = monitor;
-                this.edgeTilingManager.setEdgeTilingActive(true, this._draggedWindow);
-                this.drawingManager.showTilePreview(zone, workArea, this._draggedWindow);
+                    this.tilingManager.setDragMiniaturizationAllowed(true);
 
-                const remainingSpace = this.edgeTilingManager.calculateRemainingSpaceForZone(zone, workArea);
-                this.tilingManager.setDragRemainingSpace(remainingSpace);
+                    this.clearGhostWindows();
+                    // Ahead of the tile pass, so the layout sees them back at full size.
+                    this._restorePreviewMiniatures();
 
-                this.clearGhostWindows();
+                    // Go straight to the layout the cursor is over, the one the drop will pin. Restoring
+                    // the pre-zone layout here instead means the reordering pass on the next pointer
+                    // move immediately hauls every window somewhere else.
+                    const layout = this.reorderingManager.layoutForZoneExit();
+                    this.tilingManager.setDragLayoutHint(layout);
+                    this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, monitor);
+                    this.tilingManager.setDragLayoutHint(null);
 
-                const mosaicWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor)
-                    .filter(w => w.get_id() !== this._draggedWindow.get_id() &&
-                                 !this.edgeTilingManager.isEdgeTiled(w));
+                    this._lastReorderMonitor = monitor;
+                } else if (zone === TileZone.NONE && monitor !== this._lastReorderMonitor) {
+                    Logger.log(`Drag monitor changed to ${monitor} (fast drag skipped edge zone), restarting reorder`);
 
-                // A lone window that can fill the opposite half gets auto-tiled there on drop, so it
-                // gets its own tile preview. Miniaturizing it here would preview something that won't happen.
-                const pairsIntoOppositeHalf =
-                    mosaicWindows.length === 1 &&
-                    (zone === TileZone.LEFT_FULL || zone === TileZone.RIGHT_FULL) &&
-                    this.edgeTilingManager.isEdgeTileable(mosaicWindows[0], remainingSpace);
+                    if (this._lastReorderMonitor !== null) {
+                        this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, this._lastReorderMonitor, false, true);
+                    }
 
-                // Decided before tiling, since the tile pass is what miniaturizes now.
-                this.tilingManager.setDragMiniaturizationAllowed(!pairsIntoOppositeHalf);
-                this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, monitor, false);
-
-                this.drawingManager.hideCompanionTilePreview();
-
-                if (pairsIntoOppositeHalf) {
-                    Logger.log(`Edge tiling: previewing ${mosaicWindows[0].get_id()} as opposite half ${remainingSpace.width}x${remainingSpace.height}`);
-                    this.drawingManager.showCompanionTilePreview(remainingSpace);
-                }
-            } else if (zone === TileZone.NONE && this._currentZone !== TileZone.NONE) {
-                Logger.log('Edge tiling: exiting zone');
-                this._currentZone = TileZone.NONE;
-                this.edgeTilingManager.setEdgeTilingActive(false, null);
-                this.drawingManager.hideTilePreview();
-                this.tilingManager.setDragRemainingSpace(null);
-                this.tilingManager.setDragMiniaturizationAllowed(true);
-
-                this.clearGhostWindows();
-                // Ahead of the tile pass, so the layout sees them back at full size.
-                this._restorePreviewMiniatures();
-
-                // Go straight to the layout the cursor is over, the one the drop will pin. Restoring
-                // the pre-zone layout here instead means the reordering pass on the next pointer
-                // move immediately hauls every window somewhere else.
-                const layout = this.reorderingManager.layoutForZoneExit();
-                this.tilingManager.setDragLayoutHint(layout);
-                this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, monitor);
-                this.tilingManager.setDragLayoutHint(null);
-
-                this._lastReorderMonitor = monitor;
-            } else if (zone === TileZone.NONE && monitor !== this._lastReorderMonitor) {
-                Logger.log(`Drag monitor changed to ${monitor} (fast drag skipped edge zone), restarting reorder`);
-
-                if (this._lastReorderMonitor !== null) {
-                    this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, this._lastReorderMonitor, false, true);
+                    this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, monitor);
+                    this.reorderingManager.startDrag(this._draggedWindow);
+                    this._lastReorderMonitor = monitor;
                 }
 
-                this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, monitor);
-                this.reorderingManager.startDrag(this._draggedWindow);
-                this._lastReorderMonitor = monitor;
+                return GLib.SOURCE_REMOVE;
+            } finally {
+                this._isPositionProcessing = false;
             }
-
-            this._isPositionProcessing = false;
-            return GLib.SOURCE_REMOVE;
         });
     }
 
