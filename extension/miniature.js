@@ -3,6 +3,7 @@
 
 import GObject from 'gi://GObject';
 import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
@@ -154,10 +155,8 @@ const MiniatureEnforceEffect = GObject.registerClass({
     }
 });
 
-/**
- * Overlay over a miniature's visual frame area. Captures clicks to restore the
- * window, and carries the app icon that tells the miniature apart at a glance.
- */
+// Overlay over a miniature's visual frame area. Captures clicks and hovers to restore
+// the window, and carries the app icon that tells the miniature apart at a glance.
 const MiniatureClickOverlay = GObject.registerClass({
     GTypeName: 'MosaicMiniatureClickOverlay',
 }, class MiniatureClickOverlay extends Clutter.Actor {
@@ -189,6 +188,7 @@ const MiniatureClickOverlay = GObject.registerClass({
         this._destroyed = false;
         this._iconSuppressReasons = new Set();
         this._iconDelayId = 0;
+        this._hoverRestId = 0;
 
         // Windows with no app associated (some dialogs, some XWayland clients)
         // just get no icon; the overlay still works as a click target.
@@ -226,6 +226,53 @@ const MiniatureClickOverlay = GObject.registerClass({
             this._miniatureManager.restoreMiniature(window, null);
             return Clutter.EVENT_STOP;
         });
+
+        // Mutter maps the pointer to a window by walking up from the picked actor to a
+        // MetaWindowActor. This overlay is a window_group sibling, so the walk dies here
+        // and focus-follows-mouse never sees the miniature. Do the hover focus ourselves.
+        this.connect('motion-event', () => {
+            this._onHover();
+            return Clutter.EVENT_PROPAGATE;
+        });
+        this.connect('leave-event', () => {
+            this._cancelHoverRest();
+            return Clutter.EVENT_PROPAGATE;
+        });
+    }
+
+    _onHover() {
+        if (this._destroyed) return;
+        if (!this._miniatureManager.isHoverFocusEnabled()) return;
+
+        if (!this._miniatureManager.waitsForPointerRest()) {
+            this._restoreOnHover();
+            return;
+        }
+
+        // Every motion rearms the timer, so only a pointer that actually stops fires it.
+        this._cancelHoverRest();
+        this._hoverRestId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.MINIATURE_HOVER_REST_MS, () => {
+            this._hoverRestId = 0;
+            this._restoreOnHover();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _restoreOnHover() {
+        if (this._destroyed || !WindowState.get(this._window, IS_MINIATURE)) return;
+        // Reordering and edge tiling own the miniature while a grab is up.
+        if (global.display.is_grabbed()) return;
+        // A window that just shrank under a resting cursor would bounce straight back out.
+        if (WindowState.get(this._window, 'justMiniaturized')) return;
+
+        Logger.log(`[MINIATURE] Hover focus restoring ${this._window.get_id()}`);
+        this._miniatureManager.restoreMiniature(this._window, null);
+    }
+
+    _cancelHoverRest() {
+        if (!this._hoverRestId) return;
+        GLib.source_remove(this._hoverRestId);
+        this._hoverRestId = 0;
     }
 
     /**
@@ -340,6 +387,7 @@ const MiniatureClickOverlay = GObject.registerClass({
     fadeOutAndDestroy(duration) {
         if (this._destroyed) return;
         this.reactive = false;
+        this._cancelHoverRest();
         this._cancelIconDelay();
         if (!this._icon || this._icon.opacity === 0 || duration <= 0) {
             this.destroy();
@@ -356,6 +404,7 @@ const MiniatureClickOverlay = GObject.registerClass({
 
     destroy() {
         this._destroyed = true;
+        this._cancelHoverRest();
         this._cancelIconDelay();
         super.destroy();
     }
@@ -374,6 +423,16 @@ export const MiniatureManager = GObject.registerClass({
         this._timeoutRegistry = null;
         this._animationsManager = null;
         this._overviewActive = false;
+        this._wmPrefs = new Gio.Settings({ schema_id: 'org.gnome.desktop.wm.preferences' });
+        this._mutterSettings = new Gio.Settings({ schema_id: 'org.gnome.mutter' });
+    }
+
+    isHoverFocusEnabled() {
+        return this._wmPrefs?.get_string('focus-mode') !== 'click';
+    }
+
+    waitsForPointerRest() {
+        return this._mutterSettings?.get_boolean('focus-change-on-pointer-rest') ?? true;
     }
 
     setTimeoutRegistry(registry) {
@@ -861,6 +920,8 @@ export const MiniatureManager = GObject.registerClass({
             this.destroyMiniature(window);
         this._miniatureWindows.clear();
         this._timeoutRegistry = null;
+        this._wmPrefs = null;
+        this._mutterSettings = null;
     }
 
     getMiniatureSize(window) {

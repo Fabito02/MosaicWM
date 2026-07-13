@@ -83,6 +83,7 @@ export const MINIATURE_ICON_FADE_START = 0.5;  // Point in the icon's flight whe
 export const MINIATURE_ICON_FADE_OUT_MS = 90;  // Window is growing back underneath, so the icon has to clear out fast
 export const MINIATURE_ANIM_MS = 250;
 export const MINIATURE_FOCUS_GUARD_MS = 500;  // Block focus-triggered restore right after miniaturizing
+export const MINIATURE_HOVER_REST_MS = 300;  // How long the pointer must rest on a miniature before focus-follows-mouse restores it
 export const DND_MINIATURE_RESTORE_DELAY_MS = 400;  // Dwell time over a miniature before a DnD hover triggers restore
 
 // Restored window's distance to its old slot is the primary layout pick; layouts
