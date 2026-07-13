@@ -50,3 +50,7 @@ export const MINIATURE_SCREENSHOT_PAUSE = 'miniatureScreenshotPause';
 export const ANIMATING_MINIATURE = 'animatingMiniature';
 export const MINIATURE_OVERLAY = 'miniatureOverlay';
 export const MINIATURE_ANIM_KIND = 'miniatureAnimKind';
+// Set between the layout shrinking a descriptor and createMiniature claiming the window. Anything
+// that positions windows has to leave these alone: their descriptor already carries the mini's size,
+// so a move_resize_frame would shrink the real frame and the scale would compound on top of it.
+export const PENDING_MINIATURE = 'pendingMiniature';

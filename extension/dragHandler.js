@@ -9,9 +9,8 @@ import * as Logger from './logger.js';
 import { TileZone } from './constants.js';
 import { isResizeGrabOp, isMoveGrabOp } from './grabOps.js';
 import * as constants from './constants.js';
-import { afterAnimations, getSlowDownFactor } from './timing.js';
+import { afterAnimations } from './timing.js';
 import * as WindowState from './windowState.js';
-import { MINIATURE_ANIM_KIND } from './windowState.js';
 
 import GObject from 'gi://GObject';
 
@@ -26,6 +25,7 @@ export const DragHandler = GObject.registerClass({
         this._draggedWindow = null;
         this._edgeTileGhostWindows = [];
         this._previewMiniaturizedWindows = [];
+        this._miniatureCreatedId = 0;
         this._dragMonitorId = null;
         this._currentZone = TileZone.NONE;
         this._dragPositionChangedId = 0;
@@ -47,7 +47,6 @@ export const DragHandler = GObject.registerClass({
     get _timeoutRegistry() { return this._ext._timeoutRegistry; }
 
     clearGhostWindows() {
-        this._previewMiniaturizedWindows = [];
         for (const win of this._edgeTileGhostWindows) {
             const actor = win.get_compositor_private();
             if (actor) actor.opacity = 255;
@@ -55,10 +54,20 @@ export const DragHandler = GObject.registerClass({
         this._edgeTileGhostWindows = [];
     }
 
-    // 'restore' causes createMiniature to animate from current actor state, skipping the snap-to-natural step.
-    _commitPreviewMini() {
+    _disconnectMiniatureCreated() {
+        if (!this._miniatureCreatedId) return;
+        this._ext.miniatureManager?.disconnect(this._miniatureCreatedId);
+        this._miniatureCreatedId = 0;
+    }
+
+    // The preview miniaturizes for real, and nothing in the mosaic un-miniaturizes on its own, so
+    // leaving the zone (or dropping outside it) is the only thing that can hand these back.
+    _restorePreviewMiniatures() {
+        const miniatureManager = this._ext.miniatureManager;
         for (const win of this._previewMiniaturizedWindows) {
-            WindowState.set(win, MINIATURE_ANIM_KIND, 'restore');
+            if (!miniatureManager || !WindowState.get(win, WindowState.IS_MINIATURE)) continue;
+            Logger.log(`Edge preview cancelled - restoring miniature ${win.get_id()}`);
+            miniatureManager.restoreMiniature(win, null, { activate: false });
         }
         this._previewMiniaturizedWindows = [];
     }
@@ -82,6 +91,13 @@ export const DragHandler = GObject.registerClass({
                 return;
             Logger.log('Edge tiling: grab begin');
             this._draggedWindow = window;
+
+            // The edge preview is the only thing that miniaturizes mid-drag, so whatever gets
+            // created while the grab is live is ours to hand back if the drop never happens.
+            if (!this._miniatureCreatedId && this._ext.miniatureManager) {
+                this._miniatureCreatedId = this._ext.miniatureManager.connect('miniature-created',
+                    (_mgr, win) => this._previewMiniaturizedWindows.push(win));
+            }
 
             const windowState = this.edgeTilingManager.getWindowState(window);
 
@@ -199,6 +215,7 @@ export const DragHandler = GObject.registerClass({
                 if (actualZone === TileZone.NONE) {
                     Logger.log(`Edge tiling: grab released outside zone (pointer at ${curX},${curY}), cancelling`);
                     this.clearGhostWindows();
+                    this._restorePreviewMiniatures();
                 } else {
                     Logger.log(`Edge tiling: applying zone ${this._currentZone}`);
                     const occupiedWindow = this.edgeTilingManager.getWindowInZone(this._currentZone, workspace, monitor);
@@ -216,7 +233,9 @@ export const DragHandler = GObject.registerClass({
                                 this._skipNextTiling = null;
                                 return GLib.SOURCE_REMOVE;
                             }, 'dragHandler_skipTilingSwap');
+                            this._previewMiniaturizedWindows = [];
                         } else {
+                            this._restorePreviewMiniatures();
                             this._skipNextTiling = null;
                         }
                     } else {
@@ -228,10 +247,9 @@ export const DragHandler = GObject.registerClass({
                         Logger.log(`Edge tiling: apply result = ${success}`);
 
                         if (success) {
-                            if (this._previewMiniaturizedWindows.length > 0) {
-                                Logger.log(`Edge tile confirmed - committing ${this._previewMiniaturizedWindows.length} preview miniatures`);
-                                this._commitPreviewMini();
-                            }
+                            // The preview's miniatures are the real thing already, so the tile just keeps them.
+                            Logger.log(`Edge tile confirmed - keeping ${this._previewMiniaturizedWindows.length} miniatures`);
+                            this._previewMiniaturizedWindows = [];
 
                             this._timeoutRegistry.add(constants.RETILE_DELAY_MS, () => {
                                 this._skipNextTiling = null;
@@ -239,6 +257,7 @@ export const DragHandler = GObject.registerClass({
                             }, 'dragHandler_skipTilingApply');
                         } else {
                             this.clearGhostWindows();
+                            this._restorePreviewMiniatures();
                             this._skipNextTiling = null;
                         }
                     }
@@ -256,6 +275,9 @@ export const DragHandler = GObject.registerClass({
 
             // Failsafe: Always clear ghost windows on drag end
             this.clearGhostWindows();
+            // Anything still listed here belongs to a preview that never reached a tile.
+            this._restorePreviewMiniatures();
+            this._disconnectMiniatureCreated();
         }
 
         if (!this.windowingManager.isExcluded(window)) {
@@ -339,8 +361,6 @@ export const DragHandler = GObject.registerClass({
                     .filter(w => w.get_id() !== this._draggedWindow.get_id() &&
                                  !this.edgeTilingManager.isEdgeTiled(w));
 
-                const result = this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, monitor, false);
-
                 // A lone window that can fill the opposite half gets auto-tiled there on drop, so it
                 // gets its own tile preview. Miniaturizing it here would preview something that won't happen.
                 const pairsIntoOppositeHalf =
@@ -348,46 +368,15 @@ export const DragHandler = GObject.registerClass({
                     (zone === TileZone.LEFT_FULL || zone === TileZone.RIGHT_FULL) &&
                     this.edgeTilingManager.isEdgeTileable(mosaicWindows[0], remainingSpace);
 
+                // Decided before tiling, since the tile pass is what miniaturizes now.
+                this.tilingManager.setDragMiniaturizationAllowed(!pairsIntoOppositeHalf);
+                this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, monitor, false);
+
                 this.drawingManager.hideCompanionTilePreview();
 
                 if (pairsIntoOppositeHalf) {
                     Logger.log(`Edge tiling: previewing ${mosaicWindows[0].get_id()} as opposite half ${remainingSpace.width}x${remainingSpace.height}`);
                     this.drawingManager.showCompanionTilePreview(remainingSpace);
-                } else if (result?.overflow) {
-                    const miniSlots = this.tilingManager.computePreviewMiniSlots(mosaicWindows, remainingSpace);
-                    for (const { win, slot, scale } of miniSlots) {
-                        const actor = win.get_compositor_private();
-                        if (!actor || actor.is_destroyed()) continue;
-                        const frame = win.get_frame_rect();
-                        const actorX = actor.x;
-                        const actorY = actor.y;
-                        const extLeft = frame.x - actorX;
-                        const extTop = frame.y - actorY;
-                        const actorW = actor.width;
-                        const actorH = actor.height;
-                        const dw = actorW * (1 - scale);
-                        const dh = actorH * (1 - scale);
-                        const px = dw > 0 ? Math.max(0, Math.min(1, (slot.x - actorX - extLeft * scale) / dw)) : 0;
-                        const py = dh > 0 ? Math.max(0, Math.min(1, (slot.y - actorY - extTop * scale) / dh)) : 0;
-                        const endTx = slot.x - actorX - px * dw - extLeft * scale;
-                        const endTy = slot.y - actorY - py * dh - extTop * scale;
-                        actor.set_pivot_point(px, py);
-                        // Same leak as miniature.js's createMiniature: a tile animation may still be
-                        // in flight here, and nothing else would clear it from AnimationsManager's
-                        // tracking once this preview ease takes over.
-                        this.animationsManager?.removeAnimatingWindow(win.get_id());
-                        actor.remove_all_transitions();
-                        // No set_translation reset: preserves draw()'s compensation offset to avoid a visual jump.
-                        actor.ease({
-                            scale_x: scale,
-                            scale_y: scale,
-                            translation_x: endTx,
-                            translation_y: endTy,
-                            duration: Math.ceil(constants.ANIMATION_DURATION_MS * getSlowDownFactor()),
-                            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-                        });
-                        this._previewMiniaturizedWindows.push(win);
-                    }
                 }
             } else if (zone === TileZone.NONE && this._currentZone !== TileZone.NONE) {
                 Logger.log('Edge tiling: exiting zone');
@@ -395,8 +384,11 @@ export const DragHandler = GObject.registerClass({
                 this.edgeTilingManager.setEdgeTilingActive(false, null);
                 this.drawingManager.hideTilePreview();
                 this.tilingManager.setDragRemainingSpace(null);
+                this.tilingManager.setDragMiniaturizationAllowed(true);
 
                 this.clearGhostWindows();
+                // Ahead of the tile pass, so the layout sees them back at full size.
+                this._restorePreviewMiniatures();
 
                 // Go straight to the layout the cursor is over, the one the drop will pin. Restoring
                 // the pre-zone layout here instead means the reordering pass on the next pointer
@@ -443,6 +435,7 @@ export const DragHandler = GObject.registerClass({
             }
         }
         this.clearGhostWindows();
+        this._clearPreviewMiniIcons();
         this._skipNextTiling = null;
         this._draggedWindow = null;
         this._currentZone = null;

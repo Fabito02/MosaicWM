@@ -19,6 +19,7 @@ import {
     MINIATURE_EXT_TOP,
     MINIATURE_OVERLAY,
     ANIMATING_MINIATURE,
+    PENDING_MINIATURE,
 } from './windowState.js';
 import { getMiniatureSize, applyMiniatureActorState, animateMiniatureToTarget } from './miniature.js';
 import { isWindowAlive } from './liveness.js';
@@ -92,6 +93,7 @@ export const TilingManager = GObject.registerClass({
         this.tmp_swap = [];
         this.isDragging = false;
         this.dragRemainingSpace = null;
+        this._dragMiniaturizationAllowed = true;
         // During a drag the drag layouts are the single source of truth for geometry: the cursor
         // picks one and the drop pins it, so a tile that places windows on its own fights them.
         this._dragLayoutHint = null;
@@ -324,11 +326,17 @@ export const TilingManager = GObject.registerClass({
     enableDragMode(remainingSpace = null) {
         this.isDragging = true;
         this.dragRemainingSpace = remainingSpace;
+        this._dragMiniaturizationAllowed = true;
+    }
+
+    setDragMiniaturizationAllowed(allowed) {
+        this._dragMiniaturizationAllowed = allowed;
     }
 
     disableDragMode() {
         this.isDragging = false;
         this.dragRemainingSpace = null;
+        this._dragMiniaturizationAllowed = true;
         this._dragLayoutHint = null;
         this.invalidateLayoutCache();
     }
@@ -463,54 +471,6 @@ export const TilingManager = GObject.registerClass({
 
         Logger.log(`computeDragLayouts: ${shapeCount} shapes, ${layouts.length} unique positions for window ${draggedId} in ${((GLib.get_monotonic_time() - startTime) / 1000).toFixed(1)}ms`);
         return layouts;
-    }
-
-    // Compute which windows would be miniaturized and at what slot positions
-    // when the remaining space triggers overflow. Used to preview the mini layout.
-    // Returns [{win, slot, scale}] for the windows that must be miniaturized.
-    computePreviewMiniSlots(mosaicWindows, remainingSpace) {
-        if (!mosaicWindows.length || !remainingSpace) return [];
-
-        const miniTarget = constants.MINIATURE_TARGET_SIZE_PX;
-        const sorted = [...mosaicWindows].sort((a, b) => {
-            const fa = a.get_frame_rect();
-            const fb = b.get_frame_rect();
-            return (fa.width * fa.height) - (fb.width * fb.height);
-        });
-
-        const miniIds = new Set();
-        let lastTileResult = null;
-
-        for (const candidate of sorted) {
-            miniIds.add(candidate.get_id());
-
-            const descriptors = mosaicWindows.map((w, i) => {
-                if (miniIds.has(w.get_id())) {
-                    const f = w.get_frame_rect();
-                    const s = miniTarget / Math.max(f.width, f.height);
-                    return { index: i, id: w.get_id(), width: Math.round(f.width * s), height: Math.round(f.height * s) };
-                }
-                const f = w.get_frame_rect();
-                return { index: i, id: w.get_id(), width: f.width, height: f.height };
-            });
-
-            lastTileResult = this._tile(descriptors, remainingSpace, true);
-            if (!lastTileResult.overflow) break;
-        }
-
-        if (!lastTileResult) return [];
-
-        const allPositions = this._extractLayoutPositions(lastTileResult, remainingSpace);
-        return allPositions
-            .filter(pos => miniIds.has(pos.id))
-            .map(pos => {
-                const win = mosaicWindows.find(w => w.get_id() === pos.id);
-                if (!win) return null;
-                const f = win.get_frame_rect();
-                const scale = miniTarget / Math.max(f.width, f.height);
-                return { win, slot: pos, scale };
-            })
-            .filter(Boolean);
     }
 
     // Apply a pre-computed layout during drag
@@ -2203,9 +2163,16 @@ export const TilingManager = GObject.registerClass({
             }
         }
 
+        // An edge preview already knows where the reference is going (the tile), so it can never be
+        // the one ejected; miniaturizing the rest is the entire point of the preview. Any other drag
+        // has no such destination, so leave the mosaic alone until the drop.
+        const canMiniaturize = this.isDragging
+            ? (!!this.dragRemainingSpace && this._dragMiniaturizationAllowed)
+            : (!reference_meta_window || referenceOverflowSkipped);
+
         // Nothing to eject (no reference, or its expulsion was skipped), so try
         // miniaturizing candidates to reclaim space instead of painting overflow.
-        if (overflow && (!reference_meta_window || referenceOverflowSkipped) && !this.isDragging && this._extension?.miniatureManager) {
+        if (overflow && canMiniaturize && this._extension?.miniatureManager) {
             const focusedId = global.display.focus_window?.get_id();
             const resizingId = this._animationsManager?.getResizingWindowId();
 
@@ -2252,6 +2219,7 @@ export const TilingManager = GObject.registerClass({
                     for (const { candidate: c, frame: f, miniW: mW, miniH: mH } of pendingMinis) {
                         Logger.log(`[OVERFLOW] Miniaturizing ${c.get_id()} (${mW}x${mH})`);
                         this._pendingMiniatureWindows.push({ window: c, preSize: { x: f.x, y: f.y, width: f.width, height: f.height } });
+                        WindowState.set(c, PENDING_MINIATURE, true);
                         const desc = windows.find(w => w.id === c.get_id());
                         if (desc) { desc.width = mW; desc.height = mH; }
                     }
@@ -2335,6 +2303,8 @@ export const TilingManager = GObject.registerClass({
 
         // Clean up pending list after use (only on top-level call)
         if (!isRecursive) {
+            for (const { window: win } of this._pendingMiniatureWindows ?? [])
+                WindowState.remove(win, PENDING_MINIATURE);
             this._pendingMiniatureWindows = [];
         }
 
@@ -3402,6 +3372,10 @@ class WindowDescriptor {
             if (dryRun) return;
 
             const isMask = masks.has(this.id);
+
+            // This descriptor already carries the mini's size, so moving the frame to it would
+            // shrink the real window and createMiniature's scale would land on top of that.
+            if (WindowState.get(window, PENDING_MINIATURE)) return;
 
             if (isDragging) {
                 if (isMask) {
