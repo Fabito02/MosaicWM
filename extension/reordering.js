@@ -82,9 +82,28 @@ export const ReorderingManager = GObject.registerClass({
             return;
         }
 
-        if (!this._dragLayouts || this._dragLayouts.length === 0) return;
+        const closest = this._closestLayout(cursor);
+        if (!closest) return;
 
-        // Find closest trigger zone
+        const { layout: closestLayout, distance: minDist } = closest;
+
+        // Hysteresis: require 50% closer to switch layout
+        if (this._chosenLayout && closestLayout !== this._chosenLayout) {
+            const currentDist = this._cursorDistance(cursor, this._chosenLayout.draggedRect);
+            if (minDist > currentDist * 0.5) return;
+        }
+
+        const newState = this._tileStateFor(closestLayout);
+        if (this._lastTileState !== newState) {
+            this._tilingManager.applyDragLayout(closestLayout.positions, workspace, monitor);
+            this._lastTileState = newState;
+            this._chosenLayout = closestLayout;
+        }
+    }
+
+    _closestLayout(cursor) {
+        if (!this._dragLayouts || this._dragLayouts.length === 0) return null;
+
         let closestLayout = null;
         let minDist = Infinity;
         for (const layout of this._dragLayouts) {
@@ -95,20 +114,26 @@ export const ReorderingManager = GObject.registerClass({
             }
         }
 
-        if (!closestLayout) return;
+        return closestLayout ? { layout: closestLayout, distance: minDist } : null;
+    }
 
-        // Hysteresis: require 50% closer to switch layout
-        if (this._chosenLayout && closestLayout !== this._chosenLayout) {
-            const currentDist = this._cursorDistance(cursor, this._chosenLayout.draggedRect);
-            if (minDist > currentDist * 0.5) return;
-        }
+    _tileStateFor(layout) {
+        return `layout-${Math.round(layout.draggedRect.x)}-${Math.round(layout.draggedRect.y)}`;
+    }
 
-        const newState = `layout-${Math.round(closestLayout.draggedRect.x)}-${Math.round(closestLayout.draggedRect.y)}`;
-        if (this._lastTileState !== newState) {
-            this._tilingManager.applyDragLayout(closestLayout.positions, workspace, monitor);
-            this._lastTileState = newState;
-            this._chosenLayout = closestLayout;
-        }
+    // The layout the cursor is over, adopted as chosen but not applied. The edge-zone exit tiles
+    // the mosaic itself (only that path undoes the preview miniatures), so it has to reproduce
+    // this layout; adopting it here is what keeps the next motion from moving everything again.
+    layoutForZoneExit() {
+        if (!this.dragStart || !this._dragContext) return null;
+
+        const [x, y] = global.get_pointer();
+        const closest = this._closestLayout({ x, y });
+        if (!closest) return null;
+
+        this._chosenLayout = closest.layout;
+        this._lastTileState = this._tileStateFor(closest.layout);
+        return closest.layout;
     }
 
     startDrag(meta_window) {
@@ -215,11 +240,6 @@ export const ReorderingManager = GObject.registerClass({
         } else {
             Logger.log('stopDrag: Skipping workspace tiling (requested)');
         }
-    }
-
-    resetDragTileState() {
-        this._lastTileState = null;
-        this._chosenLayout = null;
     }
 
     destroy() {

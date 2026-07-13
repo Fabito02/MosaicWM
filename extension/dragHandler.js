@@ -398,9 +398,14 @@ export const DragHandler = GObject.registerClass({
 
                 this.clearGhostWindows();
 
+                // Go straight to the layout the cursor is over, the one the drop will pin. Restoring
+                // the pre-zone layout here instead means the reordering pass on the next pointer
+                // move immediately hauls every window somewhere else.
+                const layout = this.reorderingManager.layoutForZoneExit();
+                this.tilingManager.setDragLayoutHint(layout);
                 this.tilingManager.tileWorkspaceWindows(workspace, this._draggedWindow, monitor);
+                this.tilingManager.setDragLayoutHint(null);
 
-                this.reorderingManager.resetDragTileState();
                 this._lastReorderMonitor = monitor;
             } else if (zone === TileZone.NONE && monitor !== this._lastReorderMonitor) {
                 Logger.log(`Drag monitor changed to ${monitor} (fast drag skipped edge zone), restarting reorder`);

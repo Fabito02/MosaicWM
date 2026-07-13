@@ -70,6 +70,16 @@ export const ComputedLayouts = {
     clear() { _computedLayouts.clear(); },
 };
 
+// Mutter will not place a window outside the work area; it silently clamps. Land on the same
+// spot it would, or the layout believes the window is somewhere it never was.
+function clampToWorkArea(x, y, width, height, bounds) {
+    if (!bounds) return { x, y };
+    return {
+        x: Math.max(bounds.x, Math.min(x, bounds.x + bounds.width - width)),
+        y: Math.max(bounds.y, Math.min(y, bounds.y + bounds.height - height)),
+    };
+}
+
 export const TilingManager = GObject.registerClass({
     GTypeName: 'MosaicTilingManager',
     Signals: {
@@ -82,6 +92,9 @@ export const TilingManager = GObject.registerClass({
         this.tmp_swap = [];
         this.isDragging = false;
         this.dragRemainingSpace = null;
+        // During a drag the drag layouts are the single source of truth for geometry: the cursor
+        // picks one and the drop pins it, so a tile that places windows on its own fights them.
+        this._dragLayoutHint = null;
 
         this._edgeTilingManager = null;
         this._drawingManager = null;
@@ -316,7 +329,14 @@ export const TilingManager = GObject.registerClass({
     disableDragMode() {
         this.isDragging = false;
         this.dragRemainingSpace = null;
+        this._dragLayoutHint = null;
         this.invalidateLayoutCache();
+    }
+
+    setDragLayoutHint(layout) {
+        this._dragLayoutHint = layout?.permOrder?.length
+            ? { order: layout.permOrder, shape: layout.shape }
+            : null;
     }
 
     setDragRemainingSpace(space) {
@@ -533,10 +553,17 @@ export const TilingManager = GObject.registerClass({
 
                 if (posChanged || sizeChanged) {
                     WindowState.set(window, 'isConstrainedByMosaic', true);
-                    window.move_resize_frame(false, pos.x, pos.y, pos.width, pos.height);
+                    // Same actor-measured continuity as WindowDescriptor.draw: start the ease from
+                    // where the window really is, and end it where mutter really put it.
                     const actor = window.get_compositor_private();
+                    const alive = actor && !actor.is_destroyed();
+                    const visualX = alive ? actor.x + actor.translation_x : 0;
+                    const visualY = alive ? actor.y + actor.translation_y : 0;
+                    Logger.log(`applyDragLayout: id=${pos.id}, target=(${pos.x},${pos.y}), current=(${currentRect.x},${currentRect.y})`);
+                    window.move_frame(false, pos.x, pos.y);
+                    window.move_resize_frame(false, pos.x, pos.y, pos.width, pos.height);
                     if (actor && !actor.is_destroyed()) {
-                        actor.set_translation(currentRect.x - pos.x, currentRect.y - pos.y, 0);
+                        actor.set_translation(visualX - actor.x, visualY - actor.y, 0);
                         actor.ease({
                             translation_x: 0,
                             translation_y: 0,
@@ -974,6 +1001,17 @@ export const TilingManager = GObject.registerClass({
                 return pinned;
             }
             Logger.log('_tile: pinned shape overflows, dropping to auto-layout');
+        }
+
+        // The auto-chosen grid would land these windows somewhere else, and the reordering pass
+        // right after would drag them across the screen to fix it.
+        if (this._dragLayoutHint?.shape && this.isDragging && !isSimulation) {
+            const hinted = this._placeByShape(windows, work_area, spacing, this._dragLayoutHint.shape, useVerticalShelves);
+            if (!hinted.overflow) {
+                Logger.log(`_tile: ${windows.length} windows honoring drag layout [${this._dragLayoutHint.shape.join(',')}]`);
+                return hinted;
+            }
+            Logger.log('_tile: drag layout overflows, dropping to auto-layout');
         }
 
         const currentResult = tilingFn.call(this, windows, work_area, spacing);
@@ -1573,6 +1611,16 @@ export const TilingManager = GObject.registerClass({
         this.applySwaps(workspace, _windows);
         this.applyTmp(_windows);
 
+        // Not persisted into the swaps: an aborted drag must not leave a reorder behind.
+        if (this._dragLayoutHint) {
+            const order = this._dragLayoutHint.order;
+            _windows.sort((a, b) => {
+                const ia = order.indexOf(a.id);
+                const ib = order.indexOf(b.id);
+                return (ia === -1 ? Infinity : ia) - (ib === -1 ? Infinity : ib);
+            });
+        }
+
         const windows = [];
         for(const w of _windows)
             windows.push(this.getMask(w));
@@ -1588,7 +1636,7 @@ export const TilingManager = GObject.registerClass({
         };
     }
 
-    _drawTile(tile_info, work_area, meta_windows, dryRun = false, slotsOut = null) {
+    _drawTile(tile_info, work_area, meta_windows, dryRun = false, slotsOut = null, bounds = null) {
         const levels = tile_info.levels;
         const _x = tile_info.x;
         const _y = tile_info.y;
@@ -1596,14 +1644,14 @@ export const TilingManager = GObject.registerClass({
             let y = _y;
             for(const level of levels) {
                 Logger.log(`Drawing horizontal level at y=${y}, width=${level.width}, height=${level.height}`);
-                level.draw_horizontal(meta_windows, work_area, y, this.masks, this.isDragging, this._drawingManager, dryRun, slotsOut);
+                level.draw_horizontal(meta_windows, work_area, y, this.masks, this.isDragging, this._drawingManager, dryRun, slotsOut, bounds);
                 y += level.height + constants.WINDOW_SPACING;
             }
         } else {
             let x = _x;
             for(const level of levels) {
                 Logger.log(`Drawing vertical level at x=${x}, width=${level.width}, height=${level.height}`);
-                level.draw_vertical(meta_windows, x, this.masks, this.isDragging, this._drawingManager, dryRun, slotsOut);
+                level.draw_vertical(meta_windows, x, this.masks, this.isDragging, this._drawingManager, dryRun, slotsOut, bounds);
                 x += level.width + constants.WINDOW_SPACING;
             }
         }
@@ -2249,7 +2297,7 @@ export const TilingManager = GObject.registerClass({
         if (!animationsHandledPositioning) {
             // Only call drawTile if animations didn't handle positioning
             Logger.log('Animations did not handle positioning, calling drawTile');
-            this._drawTile(tile_info, tileArea, meta_windows, false, computedSlots);
+            this._drawTile(tile_info, tileArea, meta_windows, false, computedSlots, work_area);
             // _animateTileLayout owns the deferred unlock; since it didn't run,
             // release the lock now that positioning is done synchronously.
             this._unlockWorkspaceEarlyReturn(workspace);
@@ -2836,7 +2884,7 @@ export const TilingManager = GObject.registerClass({
         const tile_info = this._tile(windows, work_area);
 
         // Then run the draw phase in dryRun mode to just populate the cache
-        this._drawTile(tile_info, work_area, meta_windows, true);
+        this._drawTile(tile_info, work_area, meta_windows, true, null, work_area);
     }
 
     tryFitWithResize(newWindow, windows, workArea, focusedWindowOverride = null) {
@@ -3423,10 +3471,18 @@ class WindowDescriptor {
                             const sizeChanged = Math.abs(currentRect.width - this.width) > 5 || Math.abs(currentRect.height - this.height) > 5;
                             if (positionChanged || sizeChanged) {
                                 WindowState.set(window, 'isConstrainedByMosaic', true);
+                                // Where the window really is, straight off the actor, since a
+                                // half-finished ease leaves the frame at the previous target.
+                                const visualX = windowActor && !windowActor.is_destroyed() ? windowActor.x + windowActor.translation_x : 0;
+                                const visualY = windowActor && !windowActor.is_destroyed() ? windowActor.y + windowActor.translation_y : 0;
+                                // A pure move lands on the actor synchronously (a resize doesn't), so
+                                // after this the actor carries the position the window really got,
+                                // which is not x,y when the target doesn't fit and mutter clamps it.
+                                window.move_frame(false, x, y);
                                 window.move_resize_frame(false, x, y, this.width, this.height);
                                 if (windowActor && !windowActor.is_destroyed()) {
-                                    const translateX = currentRect.x - x;
-                                    const translateY = currentRect.y - y;
+                                    const translateX = visualX - windowActor.x;
+                                    const translateY = visualY - windowActor.y;
                                     windowActor.set_translation(translateX, translateY, 0);
                                     windowActor.ease({
                                         translation_x: 0,
@@ -3480,7 +3536,7 @@ class Level {
         this.work_area = work_area;
     }
 
-    draw_horizontal(meta_windows, work_area, y, masks, isDragging, drawingManager, dryRun = false, slotsOut = null) {
+    draw_horizontal(meta_windows, work_area, y, masks, isDragging, drawingManager, dryRun = false, slotsOut = null, bounds = null) {
         let x = this.x;
         for(const window of this.windows) {
             const center_offset = (work_area.height / 2 + work_area.y) - (y + window.height / 2);
@@ -3489,8 +3545,9 @@ class Level {
                 y_offset = Math.min(center_offset, this.height - window.height);
 
             // Use targetX/targetY if set (for center-gravity alignment), otherwise use calculated position
-            const drawX = window.targetX !== undefined ? window.targetX : x;
-            const drawY = window.targetY !== undefined ? window.targetY : y + y_offset;
+            const rawX = window.targetX !== undefined ? window.targetX : x;
+            const rawY = window.targetY !== undefined ? window.targetY : y + y_offset;
+            const { x: drawX, y: drawY } = clampToWorkArea(rawX, rawY, window.width, window.height, bounds);
 
             if (!dryRun)
                 Logger.log(`Window ${window.id} target: ${drawX},${drawY} (${window.width}x${window.height})`);
@@ -3506,12 +3563,13 @@ class Level {
         }
     }
 
-    draw_vertical(meta_windows, x, masks, isDragging, drawingManager, dryRun = false, slotsOut = null) {
+    draw_vertical(meta_windows, x, masks, isDragging, drawingManager, dryRun = false, slotsOut = null, bounds = null) {
         let y = this.y;
         for(const window of this.windows) {
             // Use targetX/targetY if set (for center-gravity alignment), otherwise use calculated position
-            const drawX = window.targetX !== undefined ? window.targetX : x;
-            const drawY = window.targetY !== undefined ? window.targetY : y;
+            const rawX = window.targetX !== undefined ? window.targetX : x;
+            const rawY = window.targetY !== undefined ? window.targetY : y;
+            const { x: drawX, y: drawY } = clampToWorkArea(rawX, rawY, window.width, window.height, bounds);
 
             if (!dryRun)
                 Logger.log(`Window ${window.id} target: ${drawX},${drawY} (${window.width}x${window.height})`);
