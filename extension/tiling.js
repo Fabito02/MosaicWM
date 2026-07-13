@@ -3450,10 +3450,6 @@ class WindowDescriptor {
                             const startTx = visualX - actor_x_new - px * dw - extLeft * currentScale;
                             const startTy = visualY - actor_y_new - py * dh - extTop * currentScale;
                             windowActor.set_pivot_point(px, py);
-                            // Same leak as miniature.js's createMiniature: a tile animation may
-                            // still be in flight here, and nothing else would clear it from
-                            // AnimationsManager's tracking once this preview-undo ease takes over.
-                            this._extension?.animationsManager?.removeAnimatingWindow(window.get_id());
                             windowActor.remove_all_transitions();
                             windowActor.set_scale(currentScale, currentScale);
                             windowActor.set_translation(startTx, startTy, 0);
