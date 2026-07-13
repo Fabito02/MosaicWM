@@ -92,6 +92,9 @@ export const TilingManager = GObject.registerClass({
         this.masks = new Set();
         this.tmp_swap = [];
         this.isDragging = false;
+        // Live for the whole grab, unlike isDragging/masks, which only exist once startDrag runs. The
+        // edge tile exit tiles before that point, and the layout can't move what the cursor is holding.
+        this._grabbedWindowId = null;
         this.dragRemainingSpace = null;
         this._dragMiniaturizationAllowed = true;
         // During a drag the drag layouts are the single source of truth for geometry: the cursor
@@ -331,6 +334,10 @@ export const TilingManager = GObject.registerClass({
 
     setDragMiniaturizationAllowed(allowed) {
         this._dragMiniaturizationAllowed = allowed;
+    }
+
+    setGrabbedWindow(window) {
+        this._grabbedWindowId = window ? window.get_id() : null;
     }
 
     disableDragMode() {
@@ -1630,10 +1637,10 @@ export const TilingManager = GObject.registerClass({
         const _y = tile_info.y;
 
         const windowLayouts = [];
-        // Pending miniature windows are kept out of windowLayouts (createMiniature
-        // owns their visual animation), but a first placement sibling still needs
-        // to know they're there to compute a slide-in direction against. Tracked
-        // separately so animateReTiling can see them without animating them.
+        // Windows this pass places but must not touch: pending miniatures (createMiniature owns
+        // their visual animation) and whatever is under the grab (the cursor owns its position).
+        // A first placement sibling still needs to know they're there to compute a slide-in
+        // direction against, so animateReTiling sees them without animating them.
         const miniLayouts = [];
 
         if (!tile_info.vertical) {
@@ -1677,6 +1684,14 @@ export const TilingManager = GObject.registerClass({
                             if (slotsOut) slotsOut.set(window.get_id(), slot);
                             miniLayouts.push({ window, rect: slot });
                             Logger.log(`[LAYOUT] H pending-mini ${window.get_id()}: slot=(${slot.x},${slot.y}) size=${slot.width}x${slot.height}`);
+                        } else if (window.get_id() === this._grabbedWindowId) {
+                            // Mutter's grab wins every frame, so a move_resize_frame here just yanks the
+                            // window off the cursor and snaps back. Claim the slot; the drop lands in it.
+                            const slot = { x, y: y + y_offset, width: windowDesc.width, height: windowDesc.height };
+                            ComputedLayouts.set(window, slot);
+                            if (slotsOut) slotsOut.set(window.get_id(), slot);
+                            miniLayouts.push({ window, rect: slot });
+                            Logger.log(`[LAYOUT] H grabbed ${window.get_id()}: slot=(${slot.x},${slot.y}) size=${slot.width}x${slot.height}`);
                         } else {
                             Logger.log(`[LAYOUT] H window ${window.get_id()}: target=(${x},${y + y_offset}) size=${windowDesc.width}x${windowDesc.height}`);
                             const slot = { x, y: y + y_offset, width: windowDesc.width, height: windowDesc.height };
@@ -1728,6 +1743,14 @@ export const TilingManager = GObject.registerClass({
                             if (slotsOut) slotsOut.set(window.get_id(), slot);
                             miniLayouts.push({ window, rect: slot });
                             Logger.log(`[LAYOUT] V pending-mini ${window.get_id()}: slot=(${slot.x},${slot.y}) size=${slot.width}x${slot.height}`);
+                        } else if (window.get_id() === this._grabbedWindowId) {
+                            // Mutter's grab wins every frame, so a move_resize_frame here just yanks the
+                            // window off the cursor and snaps back. Claim the slot; the drop lands in it.
+                            const slot = { x: targetX, y: targetY, width: windowDesc.width, height: windowDesc.height };
+                            ComputedLayouts.set(window, slot);
+                            if (slotsOut) slotsOut.set(window.get_id(), slot);
+                            miniLayouts.push({ window, rect: slot });
+                            Logger.log(`[LAYOUT] V grabbed ${window.get_id()}: slot=(${slot.x},${slot.y}) size=${slot.width}x${slot.height}`);
                         } else {
                             Logger.log(`[LAYOUT] V window ${window.get_id()}: target=(${targetX},${targetY}) size=${windowDesc.width}x${windowDesc.height}`);
                             const slot = { x: targetX, y: targetY, width: windowDesc.width, height: windowDesc.height };

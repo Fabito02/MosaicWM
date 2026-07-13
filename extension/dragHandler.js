@@ -91,6 +91,7 @@ export const DragHandler = GObject.registerClass({
                 return;
             Logger.log('Edge tiling: grab begin');
             this._draggedWindow = window;
+            this.tilingManager.setGrabbedWindow(window);
 
             // The edge preview is the only thing that miniaturizes mid-drag, so whatever gets
             // created while the grab is live is ours to hand back if the drop never happens.
@@ -127,6 +128,8 @@ export const DragHandler = GObject.registerClass({
                     if (!isButtonPressed) {
                         Logger.log('Edge tiling: button released during restoration, skipping startDrag');
                         this._draggedWindow = null;
+                        // The retile below can only move the window once nothing claims the cursor holds it.
+                        this.tilingManager.setGrabbedWindow(null);
 
                         // Retile the workspace so the window returns to mosaic position
                         const workspace = window.get_workspace();
@@ -190,6 +193,8 @@ export const DragHandler = GObject.registerClass({
 
     _grabOpEndHandler = (_display, window, grabpo) => {
         this._currentGrabOp = null;
+        // Unconditional: a leftover id would freeze that window out of every later layout.
+        this.tilingManager.setGrabbedWindow(null);
 
         if ((isMoveGrabOp(grabpo) || grabpo === Meta.GrabOp.KEYBOARD_MOVING) && window === this._draggedWindow) {
             if (this._dragPositionChangedId && window) {
