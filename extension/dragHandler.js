@@ -143,7 +143,7 @@ export const DragHandler = GObject.registerClass({
                             this._dragPositionChangedId = window.connect('position-changed', this._onDragPositionChanged.bind(this));
                         }
                     }
-                });
+                }, true);
                 return;
             } else {
                 this._currentZone = TileZone.NONE;

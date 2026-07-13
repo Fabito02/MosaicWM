@@ -8,7 +8,7 @@ import Meta from 'gi://Meta';
 import * as constants from './constants.js';
 import { TileZone } from './constants.js';
 import * as WindowState from './windowState.js';
-import { IS_MINIATURE } from './windowState.js';
+import { IS_MINIATURE, ANIMATING_MINIATURE, MINIATURE_ANIM_KIND } from './windowState.js';
 import { getMiniatureSize } from './miniature.js';
 
 import GObject from 'gi://GObject';
@@ -555,17 +555,13 @@ export const EdgeTilingManager = GObject.registerClass({
         return true;
     }
 
-    // Edge tiling and miniaturization are exclusive; drop the miniature and reset the actor
-    // transform so the enforce effect stops scaling this window down inside its zone.
+    // Edge tiling and miniaturization are exclusive. Leave the actor's transform alone though, since
+    // animateWindow eases from it, and the stale anim keys would make it skip the scale ease.
     _dropMiniature(window) {
         if (!this._miniatureManager || !WindowState.get(window, IS_MINIATURE)) return;
         this._miniatureManager.destroyMiniature(window);
-        const actor = window.get_compositor_private();
-        if (actor) {
-            actor.remove_all_transitions();
-            actor.set_scale(1, 1);
-            actor.set_translation(0, 0, 0);
-        }
+        WindowState.remove(window, ANIMATING_MINIATURE);
+        WindowState.remove(window, MINIATURE_ANIM_KIND);
     }
 
     checkQuarterExpansion(workspace, monitor) {
@@ -778,6 +774,13 @@ export const EdgeTilingManager = GObject.registerClass({
             if (this._animationsManager) {
                 this._animationsManager.animateWindow(window, rect, { subtle: true });
             } else {
+                // Nobody eases the leftover miniature transform away here, so clear it by hand.
+                const actor = window.get_compositor_private();
+                if (actor) {
+                    actor.remove_all_transitions();
+                    actor.set_scale(1, 1);
+                    actor.set_translation(0, 0, 0);
+                }
                 window.move_resize_frame(false, rect.x, rect.y, rect.width, rect.height);
             }
 
@@ -890,7 +893,7 @@ export const EdgeTilingManager = GObject.registerClass({
         return true;
     }
 
-    removeTile(window, callback = null) {
+    removeTile(window, callback = null, placeAtCursor = false) {
         const winId = window.get_id();
         const savedState = WindowState.get(window, 'edgeTilingState');
 
@@ -973,11 +976,21 @@ export const EdgeTilingManager = GObject.registerClass({
 
         // Restore the pre-tiling size as it was. Whether it still fits is the mosaic's call, and it
         // shrinks or miniaturizes accordingly; pre-shrinking here would just lose the size for good.
-        const [cursorX, cursorY] = global.get_pointer();
-        const restoredX = cursorX - (savedWidth / 2);
-        const restoredY = cursorY - 20;
+        let restoredX;
+        let restoredY;
+        if (placeAtCursor) {
+            const [cursorX, cursorY] = global.get_pointer();
+            restoredX = cursorX - (savedWidth / 2);
+            restoredY = cursorY - 20;
+        } else {
+            // Only the window the pointer is holding belongs at the cursor. A dependent or a
+            // swapped-out tile isn't, so it grows in place and lets the mosaic ease it to its slot.
+            const frame = window.get_frame_rect();
+            restoredX = frame.x;
+            restoredY = frame.y;
+        }
 
-        Logger.log(`removeTile: Restoring window ${winId} to size ${savedWidth}x${savedHeight} at cursor (${restoredX}, ${restoredY})`);
+        Logger.log(`removeTile: Restoring window ${winId} to size ${savedWidth}x${savedHeight} at (${restoredX}, ${restoredY})`);
         window.move_resize_frame(false, restoredX, restoredY, savedWidth, savedHeight);
 
         if (callback) {
