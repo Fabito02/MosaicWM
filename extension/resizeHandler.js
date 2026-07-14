@@ -366,8 +366,14 @@ export const ResizeHandler = GObject.registerClass({
                     WindowState.set(window, 'targetSmartResizeSize', null);
                     this._disarmClampVerification(window);
                 }
-                this._sizeChanged = false;
-                return;
+
+                // A sacred restore waits on this same size-changed, and the resize that just
+                // landed is the one it ordered itself. Returning here would strand it until
+                // the safety timeout.
+                if (WindowState.get(window, 'isRestoringSacred') === undefined) {
+                    this._sizeChanged = false;
+                    return;
+                }
             }
 
 
@@ -474,7 +480,6 @@ export const ResizeHandler = GObject.registerClass({
                             Logger.log(`Preferred size updated (ambient): ${window.get_id()} = ${rect.width}x${rect.height}`);
                         }
                     } else if (WindowState.get(window, 'geometryReady')) {
-                        // First time seeing a size for this window
                         WindowState.set(window, 'preferredSize', { width: rect.width, height: rect.height });
                         Logger.log(`Initial preferred size saved: ${window.get_id()} = ${rect.width}x${rect.height}`);
                     }
@@ -560,7 +565,6 @@ export const ResizeHandler = GObject.registerClass({
                         Logger.log(`Resize overflow detected for window ${window.get_id()} - enabling ghost mode`);
                         this.tilingManager.tileWorkspaceWindows(workspace, null, monitor, true, false);
                     } else {
-                        // Recovery logic: if it fits again, clear overflow state and restore full opacity
                         if (canFit && this._resizeInOverflow) {
                             this._resizeInOverflow = false;
                             this._resizeOverflowWindow = null;
@@ -743,7 +747,6 @@ export const ResizeHandler = GObject.registerClass({
             // rebalanced right after it just landed.
             this._resizeGracePeriod = GLib.get_monotonic_time() / 1000;
 
-            // Clear unmaximizing flags after a settle period
             this._timeoutRegistry.add(constants.RESIZE_SETTLE_DELAY_MS, () => {
                 WindowState.remove(window, 'unmaximizing');
                 WindowState.remove(window, 'isConstrainedByMosaic');
@@ -791,7 +794,6 @@ export const ResizeHandler = GObject.registerClass({
             WindowState.set(window, 'preferredSize', preMaxSize);
         }
 
-        // SMART FIT: Try to fit without resize first, then attempt to fit WITH resize
         const existingWindows = targetWorkspace.list_windows().filter(w => !this.windowingManager.isExcluded(w));
         let canFit = this.tilingManager.canFitWindow(window, targetWorkspace, monitor, true, preMaxSize);
         let resizeNeeded = false;
