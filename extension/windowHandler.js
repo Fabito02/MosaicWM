@@ -159,24 +159,7 @@ export const WindowHandler = GObject.registerClass({
                         WindowState.remove(win, 'openedMaximized');
                         WindowState.remove(win, 'unmaximizing');
                         WindowState.remove(win, 'isEnteringSacred');
-                        const ws = win.get_workspace();
-                        const mon = win.get_monitor();
-                        // Only capture if nothing's recorded yet, so a later manual resize or
-                        // Smart Resize decision is never clobbered.
-                        if (!WindowState.get(win, 'preferredSize')) {
-                            const settled = win.get_frame_rect();
-                            const wa = ws && mon !== null ? ws.get_work_area_for_monitor(mon) : null;
-                            const isMonitorSized = wa && settled.width >= wa.width && settled.height >= wa.height;
-                            // No saved_rect means Mutter's unmaximize leaves the frame at the literal
-                            // monitor size, indistinguishable from maximized. Use 95% of the work
-                            // area instead so it reads as "nearly full" rather than maximized.
-                            const size = isMonitorSized
-                                ? { width: Math.floor(wa.width * 0.95), height: Math.floor(wa.height * 0.95) }
-                                : { width: settled.width, height: settled.height };
-                            WindowState.set(win, 'preferredSize', size);
-                            Logger.log(`Captured preferredSize on unmaximize for ${win.get_id()}: ${size.width}x${size.height}${isMonitorSized ? ' (95% fallback, no real shrink)' : ''}`);
-                        }
-                        if (ws) this.tilingManager.tileWorkspaceWindows(ws, win, mon);
+                        this._settleBornSacredExit(win, 'unmaximize');
                     } else {
                         this._ext.resizeHandler.tryExitSacred(win);
                     }
@@ -196,19 +179,7 @@ export const WindowHandler = GObject.registerClass({
                 WindowState.remove(win, 'openedMaximized');
                 WindowState.remove(win, 'unmaximizing');
                 WindowState.remove(win, 'isEnteringSacred');
-                const ws = win.get_workspace();
-                const mon = win.get_monitor();
-                if (!WindowState.get(win, 'preferredSize')) {
-                    const settled = win.get_frame_rect();
-                    const wa = ws && mon !== null ? ws.get_work_area_for_monitor(mon) : null;
-                    const isMonitorSized = wa && settled.width >= wa.width && settled.height >= wa.height;
-                    const size = isMonitorSized
-                        ? { width: Math.floor(wa.width * 0.95), height: Math.floor(wa.height * 0.95) }
-                        : { width: settled.width, height: settled.height };
-                    WindowState.set(win, 'preferredSize', size);
-                    Logger.log(`Captured preferredSize on unfullscreen for ${win.get_id()}: ${size.width}x${size.height}${isMonitorSized ? ' (95% fallback, no real shrink)' : ''}`);
-                }
-                if (ws) this.tilingManager.tileWorkspaceWindows(ws, win, mon);
+                this._settleBornSacredExit(win, 'unfullscreen');
             } else {
                 this._ext.resizeHandler.tryExitSacred(win);
             }
@@ -237,7 +208,6 @@ export const WindowHandler = GObject.registerClass({
 
         this._windowSignals.set(window, ids);
 
-        // Initialize exclusion state tracking
         const currentExclusion = this.windowingManager.isExcluded(window);
         WindowState.set(window, 'previousExclusionState', currentExclusion);
 
@@ -264,17 +234,71 @@ export const WindowHandler = GObject.registerClass({
         WindowState.remove(window, 'previousWorkspace');
     }
 
+    _isFrameMonitorSized(win) {
+        const ws = win.get_workspace();
+        const mon = win.get_monitor();
+        const wa = ws && mon !== null ? ws.get_work_area_for_monitor(mon) : null;
+        const frame = win.get_frame_rect();
+        return !!wa && frame.width >= wa.width && frame.height >= wa.height;
+    }
+
+    // The state flips before the client commits the size that goes with it, so the frame
+    // here can still be the maximized one. Tiling on it sends a configure the client's own
+    // late commit then overrides, so wait for that commit.
+    _settleBornSacredExit(win, label) {
+        if (!this._isFrameMonitorSized(win)) {
+            this._captureAndTile(win, label);
+            return;
+        }
+
+        let sizeId = null;
+        let unmanagedId = null;
+        const disconnect = () => {
+            if (sizeId) win.disconnect(sizeId);
+            if (unmanagedId) win.disconnect(unmanagedId);
+            sizeId = unmanagedId = null;
+        };
+
+        sizeId = win.connect('size-changed', () => {
+            disconnect();
+            this._captureAndTile(win, label);
+        });
+        unmanagedId = win.connect('unmanaged', disconnect);
+    }
+
+    _captureAndTile(win, label) {
+        if (!isWindowAlive(win)) return;
+
+        const ws = win.get_workspace();
+        const mon = win.get_monitor();
+        // Only capture if nothing's recorded yet, so a later manual resize or
+        // Smart Resize decision is never clobbered.
+        if (!WindowState.get(win, 'preferredSize')) {
+            const settled = win.get_frame_rect();
+            const wa = ws && mon !== null ? ws.get_work_area_for_monitor(mon) : null;
+            // A client that stays monitor-sized through the exit leaves a frame
+            // indistinguishable from maximized. Use 95% of the work area instead so it
+            // reads as "nearly full" rather than maximized.
+            const isMonitorSized = wa && settled.width >= wa.width && settled.height >= wa.height;
+            const size = isMonitorSized
+                ? { width: Math.floor(wa.width * 0.95), height: Math.floor(wa.height * 0.95) }
+                : { width: settled.width, height: settled.height };
+            WindowState.set(win, 'preferredSize', size);
+            Logger.log(`Captured preferredSize on ${label} for ${win.get_id()}: ${size.width}x${size.height}${isMonitorSized ? ' (95% fallback, no real shrink)' : ''}`);
+        }
+
+        if (ws) this.tilingManager.tileWorkspaceWindows(ws, win, mon);
+    }
+
     onWindowUnmaximized(window) {
         const workspace = window.get_workspace();
         if (!workspace) return;
 
-        // Clear the opened-maximized flag now that the window has been unmaximized
         WindowState.remove(window, 'openedMaximized');
 
         const monitor = window.get_monitor();
         const workspaceWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor);
 
-        // Check if we should retile or if it's a standalone window
         if (workspaceWindows.length > 1) {
             // Restore preferred size if it was edge-constrained or smart-resized
             if (WindowState.get(window, 'isConstrainedByMosaic')) {
@@ -292,7 +316,6 @@ export const WindowHandler = GObject.registerClass({
 
         const isNowExcluded = this.windowingManager.isExcluded(window);
 
-        // Track previous state to detect transitions
         const wasExcluded = WindowState.get(window, 'previousExclusionState') || false;
         WindowState.set(window, 'previousExclusionState', isNowExcluded);
 
@@ -348,7 +371,6 @@ export const WindowHandler = GObject.registerClass({
                 const existingWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor)
                     .filter(w => w.get_id() !== window.get_id() && !this.windowingManager.isExcluded(w));
 
-                // Check if window fits without resize
                 if (this.tilingManager.canFitWindow(window, workspace, monitor)) {
                     Logger.log('Re-included window fits without resize');
                     WindowState.set(window, 'justReturnedFromExclusion', true);
@@ -1007,7 +1029,6 @@ export const WindowHandler = GObject.registerClass({
                     return GLib.SOURCE_REMOVE;
                 }
 
-                // Enqueue window for async sequential fit evaluation
                 this.enqueueWindowForEvaluation(window, workspace, monitor);
 
                 return GLib.SOURCE_REMOVE;
@@ -1069,7 +1090,6 @@ export const WindowHandler = GObject.registerClass({
                     this._awaitWindowReadiness(window, () => processWindowCallback() === GLib.SOURCE_REMOVE);
                 }
 
-                // Now that window is processed, connect standard signals
                 this.connectWindowSignals(window);
             };
 
@@ -1109,7 +1129,6 @@ export const WindowHandler = GObject.registerClass({
             return;
         }
 
-        // Capture natural size immediately upon arrival to a workspace
         this._ext.tilingManager.savePreferredSize(window);
 
         // addedTime orders miniaturization candidates; arrivalPending shields the
@@ -1187,7 +1206,6 @@ export const WindowHandler = GObject.registerClass({
             if (previousWorkspaceIndex !== undefined && previousWorkspaceIndex !== WORKSPACE.index() && timeSinceRemoved < constants.SAFETY_TIMEOUT_BUFFER_MS) {
                 // Skip if this is an overflow move, not a real drag-drop
                 if (!WindowState.get(WINDOW, 'movedByOverflow')) {
-                    // ACTIVATE destination workspace and EXIT Overview
                     WORKSPACE.activate(global.get_current_time());
                     this._ext.windowingManager.showWorkspaceSwitcher(WORKSPACE, MONITOR);
 
@@ -1200,7 +1218,6 @@ export const WindowHandler = GObject.registerClass({
                         Main.overview.hide();
                     }
 
-                    // Clear DnD tracking; normal flow handles the window
                     WindowState.remove(WINDOW, 'previousWorkspace');
                     WindowState.remove(WINDOW, 'removedTimestamp');
                     WindowState.remove(WINDOW, 'manualWorkspaceMove');
@@ -1254,7 +1271,6 @@ export const WindowHandler = GObject.registerClass({
         WindowState.set(window, 'previousWorkspace', workspace.index());
         WindowState.set(window, 'removedTimestamp', now);
 
-        // SKIP if window was moved by overflow
         const wasMovedByOverflow = WindowState.get(window, 'movedByOverflow');
 
         // Capture removed window's size before any operations. Guarded since the
@@ -1277,7 +1293,6 @@ export const WindowHandler = GObject.registerClass({
             const WORKSPACE = workspace;
             const MONITOR = removedMonitor;
 
-            // Check if workspace still exists and has windows
             if (!WORKSPACE || WORKSPACE.index() < 0) {
                 return GLib.SOURCE_REMOVE;
             }
@@ -1304,7 +1319,6 @@ export const WindowHandler = GObject.registerClass({
                     settleTimeoutName: 'windowHandler_restoreSettle',
                 });
             } else {
-                // Workspace is now empty of mosaic windows
                 const allRelatedWindows = this._ext.windowingManager.getMonitorWorkspaceWindows(WORKSPACE, MONITOR)
                     .filter(w => w.get_id() !== removedId);
                 if (allRelatedWindows.length === 0) {
@@ -1319,7 +1333,6 @@ export const WindowHandler = GObject.registerClass({
                         this._ext.windowingManager.renavigate(WORKSPACE, global.workspace_manager.get_active_workspace() === WORKSPACE, this._ext._lastVisitedWorkspace, MONITOR);
                     }
 
-                    // Cleanup flag (if any)
                     WindowState.remove(window, 'isRestoringSacred');
                 }
             }
@@ -1332,7 +1345,6 @@ export const WindowHandler = GObject.registerClass({
         const rect = WINDOW.get_frame_rect();
 
         if (rect.width > 0 && rect.height > 0) {
-            // Geometry ready
             WindowState.set(WINDOW, 'waitingForGeometry', false);
             WindowState.set(WINDOW, 'geometryReady', true);
 
